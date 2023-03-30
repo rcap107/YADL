@@ -25,8 +25,8 @@ def import_from_yago(filepath: Path, engine="polars"):
     if engine == "polars":
         triplets = pl.read_parquet(filepath)[:-1]
     elif engine == "pandas":
-        triplets.drop(triplets.tail(1).index, inplace=True)
         triplets = pd.read_parquet(filepath)
+        triplets.drop(triplets.tail(1).index, inplace=True)
     else:
         raise ValueError(f"Unknown engine {engine}")
     triplets.columns = ["id", "subject", "predicate", "cat_object", "num_object"]
@@ -88,6 +88,7 @@ def count_occurrences_by_columns(
         ).collect()
     else:
         raise TypeError("Inappropriate dataframe type.")
+
 
 
 # Function used to prepare the node layout for the graph picture.

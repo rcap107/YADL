@@ -215,3 +215,26 @@ def get_edge_trace(graph, ll):
         mode="lines",
     )
     return edge_trace
+
+
+def get_cooccurring_predicates(df: pl.DataFrame):
+    return (df.lazy().join(
+        df.lazy(), left_on="subject",
+        right_on="subject", how="left"
+    ).select(
+        [
+            pl.col("predicate"),
+            pl.col("predicate_right")
+        ]
+    ).groupby("predicate_right").agg(
+        pl.first("predicate")
+    ).collect())    
+
+def get_count_cooccurring_predicates(df: pl.DataFrame):
+    return (df.lazy().groupby(
+        ["predicate","predicate_right"]
+    ).agg(
+        pl.count()
+    ).sort("count", descending=True).collect())
+    
+    

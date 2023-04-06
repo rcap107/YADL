@@ -1,17 +1,26 @@
 # %%
-import src.yago.utils as utils
-import src.yago.queries as queries
+from pathlib import Path
 
-# %%
-import seaborn as sns
 import matplotlib.pyplot as plt
 import networkx as nx
+import numpy as np
 import pandas as pd
 import polars as pl
-from pathlib import Path
-import numpy as np
-from tqdm import tqdm
+# %%
+import seaborn as sns
 from timerit import Timerit
+from tqdm import tqdm
+
+import src.yago.queries as queries
+import src.yago.utils as utils
+
+
+#%%
+def print_row(row: dict):
+    print(f"Exp: {row['experiment']} - Engine: {row['key']} - Mean: {row['mean']:.2f} - Min: {row['min']:.2f}")
+
+#%% 
+timer_runs = 10
 
 # %%
 yago_path = Path("/storage/store3/work/jstojano/yago3/")
@@ -19,9 +28,9 @@ facts1_path = Path(yago_path, "facts_parquet/yago_updated_2022_part1")
 facts2_path = Path(yago_path, "facts_parquet/yago_updated_2022_part2")
 
 # %%
-rows = []
 # %%
-ti = Timerit(num=10)
+ti = Timerit(num=timer_runs)
+rows = []
 
 print("reading")
 
@@ -41,12 +50,17 @@ for engine in ["pandas", "polars"]:
         "min": ti.min(),
         "key": engine,
     }
+    print_row(row)
     rows.append(row)
 
 with open("runs.txt", "a") as fp:
     for row in rows:
         fp.write(",".join([str(_) for _ in row.values()]) + "\n")
 
+#%% 
+# Sampling
+# yagofacts = yagofacts.sample(1000)
+# yagotypes = yagotypes.sample(1000)
 
 # %%
 # Converting to pandas
@@ -54,13 +68,10 @@ print("converting")
 yagofacts_pd = yagofacts.to_pandas()
 yagotypes_pd = yagotypes.to_pandas()
 
-# %% [markdown]
-# ## Some profiling
-
-# %% [markdown]
-# ### Predicates
-
 # %%
+ti = Timerit(num=timer_runs)
+rows = []
+
 print("find_unique_predicates")
 for engine, df in {"polars": yagofacts, "pandas": yagofacts_pd}.items():
     for timer in ti.reset(engine):
@@ -71,6 +82,7 @@ for engine, df in {"polars": yagofacts, "pandas": yagofacts_pd}.items():
         "min": ti.min(),
         "key": engine,
     }
+    print_row(row)
     rows.append(row)
 
 with open("runs.txt", "a") as fp:
@@ -79,6 +91,9 @@ with open("runs.txt", "a") as fp:
 
 
 # %%
+ti = Timerit(num=timer_runs)
+rows = []
+
 print("query_count_occurrences_by_columns")
 for engine, df in {"polars": yagofacts, "pandas": yagofacts_pd}.items():
     for timer in ti.reset(engine):
@@ -89,31 +104,17 @@ for engine, df in {"polars": yagofacts, "pandas": yagofacts_pd}.items():
         "min": ti.min(),
         "key": engine,
     }
+    print_row(row)
     rows.append(row)
 
 with open("runs.txt", "a") as fp:
     for row in rows:
         fp.write(",".join([str(_) for _ in row.values()]) + "\n")
-
-
-print("query_count_occurrences_by_columns")
-for engine, df in {"polars": yagotypes, "pandas": yagotypes_pd}.items():
-    for timer in ti.reset(engine):
-        unique_types = queries.query_count_occurrences_by_columns(df, "cat_object")
-    row = {
-        "experiment": "query_count_occurrences_by_columns",
-        "mean": ti.mean(),
-        "min": ti.min(),
-        "key": engine,
-    }
-    rows.append(row)
-
-with open("runs.txt", "a") as fp:
-    for row in rows:
-        fp.write(",".join([str(_) for _ in row.values()]) + "\n")
-
 
 # %%
+ti = Timerit(num=timer_runs)
+rows = []
+
 print("query_most_frequent_types")
 for engine, df in {"polars": yagotypes, "pandas": yagotypes_pd}.items():
     for timer in ti.reset(engine):
@@ -124,9 +125,9 @@ for engine, df in {"polars": yagotypes, "pandas": yagotypes_pd}.items():
         "min": ti.min(),
         "key": engine,
     }
+    print_row(row)
     rows.append(row)
-
-# %%
+    
 with open("runs.txt", "a") as fp:
     for row in rows:
         fp.write(",".join([str(_) for _ in row.values()]) + "\n")

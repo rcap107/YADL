@@ -1,11 +1,14 @@
 from pathlib import Path
 from typing import Union
 
+import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
 import pandas as pd
-import polars as pl
 import plotly.graph_objects as go
-import networkx as nx
+import polars as pl
+import seaborn as sns
+from matplotlib.colors import LogNorm
 
 
 def import_from_yago(filepath: Path, engine="polars"):
@@ -90,7 +93,6 @@ def count_occurrences_by_columns(
         raise TypeError("Inappropriate dataframe type.")
 
 
-
 # Function used to prepare the node layout for the graph picture.
 def bipartite(left, right, aspect_ratio=4 / 3, scale=1):
     left = list(set(left))
@@ -154,7 +156,9 @@ def get_node_info(graph, node_text):
     node_text = []
     for node, adjacencies in enumerate(graph.adjacency()):
         node_adjacencies.append(len(adjacencies[1]))
-        node_text.append(f"{adjacencies[0]}: # of connections: " + str(len(adjacencies[1])))
+        node_text.append(
+            f"{adjacencies[0]}: # of connections: " + str(len(adjacencies[1]))
+        )
 
     return node_adjacencies, node_text
 
@@ -218,23 +222,154 @@ def get_edge_trace(graph, ll):
 
 
 def get_cooccurring_predicates(df: pl.DataFrame):
-    return (df.lazy().join(
-        df.lazy(), left_on="subject",
-        right_on="subject", how="left"
-    ).select(
-        [
-            pl.col("predicate"),
-            pl.col("predicate_right")
-        ]
-    ).groupby("predicate_right").agg(
-        pl.first("predicate")
-    ).collect())    
+    return (
+        df.lazy()
+        .join(df.lazy(), left_on="subject", right_on="subject", how="left")
+        .select([pl.col("predicate"), pl.col("predicate_right")])
+        .collect()
+    )
+
 
 def get_count_cooccurring_predicates(df: pl.DataFrame):
-    return (df.lazy().groupby(
-        ["predicate","predicate_right"]
-    ).agg(
-        pl.count()
-    ).sort("count", descending=True).collect())
+    return (
+        df.lazy()
+        .groupby(["predicate", "predicate_right"])
+        .agg(pl.count())
+        .sort("count", descending=True)
+        .collect()
+    )
+
+
+def get_numerical_coordinates(df:pd.DataFrame):
+    df.columns = [
+        "pred_left",
+        "pred_right",
+        "count"
+    ]
+    df[
+        ["pred_left", "pred_right"]
+    ] = df[["pred_left", "pred_right"]].astype(
+        "category"
+    )
+    df[
+        ["pred_left_int", "pred_right_int"]
+    ] = df[["pred_left", "pred_right"]].apply(
+        lambda x: x.cat.codes
+    )
     
+    return df
+
+
+def get_labels_from_cat_codes(df: pd.DateOffset):
+    labels_dict = dict(
+    sorted(
+        dict(
+            zip(
+                df["pred_left"].cat.codes,
+                df["pred_left"],
+            )
+        ).items()
+    )
+    )
+    return labels_dict
     
+
+def plot_pairwise_heatmap(df_count_cooccurring_predicates: pd.DataFrame):
+    df_count_cooccurring_predicates = get_numerical_coordinates(df_count_cooccurring_predicates)
+    
+    max_category = (
+        df_count_cooccurring_predicates[["pred_left_int", "pred_right_int"]]
+        .max()
+        .max()
+    )
+    
+    # Set the proper coordinates
+    zz = np.zeros((max_category + 1, max_category + 1))
+    zz[
+        df_count_cooccurring_predicates["pred_left_int"],
+        df_count_cooccurring_predicates["pred_right_int"],
+    ] = df_count_cooccurring_predicates["count"]
+    # Set the proper labels
+    dd = get_labels_from_cat_codes(df_count_cooccurring_predicates)
+    
+    norm = LogNorm()
+    fig, ax = plt.subplots(figsize=(10,10))
+    sns.heatmap(
+        zz,
+        robust=True,
+        cmap="rocket",
+        norm=norm,
+        xticklabels=list(dd.values()),
+        yticklabels=list(dd.values()),
+        square=True,
+        ax=ax
+    )
+    ax.set_title("Frequency of co-occurrence of predicate pairs in frequent values")
+
+    return ax
+
+def plot_predicate_frequency(df_cooc_predicates: pd.DataFrame, ax=None, label=None):
+    if ax is not None:
+        sns.lineplot(data=df_cooc_predicates, x=range(len(df_cooc_predicates)),y="count", label=label, ax=ax)
+    else:
+        ax = sns.lineplot(data=df_cooc_predicates, x=range(len(df_cooc_predicates)),y="count", label=label)
+        
+    ax.set_yscale("log")
+    ax.set_title("Frequency of each pair of predicates. ")
+    ax.set_xlabel("Rank of the predicate pair.")
+    ax.set_ylabel("Number of occurrences of the predicate.")
+    return ax
+    
+def plot_pairwise_relplot(df_count_cooccurring_predicates):
+    df_count_cooccurring_predicates = get_numerical_coordinates(df_count_cooccurring_predicates)
+    
+    dd = get_labels_from_cat_codes(df_count_cooccurring_predicates)
+    
+    norm = LogNorm()
+    g = sns.relplot(
+        data=df_count_cooccurring_predicates,
+        x="pred_left_int",
+        y="pred_right_int",
+        size="count",
+        hue="count",
+        hue_norm=norm,
+        sizes=(10,250),
+        size_norm=norm, 
+        palette="vlag",
+        height=7
+        )
+    g.set(xticks=np.arange(len(dd)), yticks=np.arange(len(dd)))
+    _=g.set_xticklabels(list(dd.values()), rotation=45, horizontalalignment='right', fontsize=6)
+    _=g.set_yticklabels(list(dd.values()), horizontalalignment='right', fontsize=6)
+    sns.despine(left=True, bottom=True)
+    
+def join_types_predicates(yagotypes, yagofacts, types_subset):    
+    types_predicates=(yagotypes.lazy().filter(
+        pl.col("cat_object").is_in(types_subset["type"])
+    ).join(
+        yagofacts.lazy(),
+        left_on="subject",
+        right_on="subject",
+        how="left"
+    ).select(
+        pl.col("subject"),
+        pl.col("cat_object").alias("type"),
+        pl.col("predicate_right").alias("predicate")
+    ).unique(
+        ).drop_nulls(
+            ).select(
+                [
+                    pl.col("type"),
+                    pl.col("predicate")
+                ]
+            ).groupby(
+                [
+                    pl.col("type"),
+                    pl.col("predicate")
+                ]
+            ).agg(
+                [
+                    pl.count()
+                ]
+            ).sort("count", descending=True).collect())
+    return types_predicates

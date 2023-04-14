@@ -118,7 +118,9 @@ def get_count_cooccurring_predicates(df: pl.DataFrame):
     )
 
 
-def join_types_predicates(yagotypes, yagofacts, types_subset):
+def join_types_predicates(yagotypes, yagofacts, types_subset, lazy=False):
+    if type(types_subset)==pl.LazyFrame:
+        types_subset = types_subset.collect()
     types_predicates = (
         yagotypes.lazy()
         .filter(pl.col("cat_object").is_in(types_subset["type"]))
@@ -134,10 +136,35 @@ def join_types_predicates(yagotypes, yagofacts, types_subset):
         .groupby([pl.col("type"), pl.col("predicate")])
         .agg([pl.count()])
         .sort("count", descending=True)
-        .collect()
     )
-    return types_predicates
+    if lazy:
+        return types_predicates
+    else:
+        return types_predicates.collect()
 
+
+def join_types_predicates_v2(yagotypes, yagofacts, types_subset, lazy=False):
+    types_predicates = (
+    yagotypes.lazy()
+    .join(types_subset, left_on="cat_object", right_on="type", how="inner")
+    .join(yagofacts.lazy(), left_on="subject", right_on="subject", how="left")
+    .select(
+        pl.col("subject"),
+        pl.col("cat_object").alias("type"),
+        pl.col("predicate_right").alias("predicate"),
+    )
+    .unique()
+    .drop_nulls()
+    .select([pl.col("type"), pl.col("predicate")])
+    .groupby([pl.col("type"), pl.col("predicate")])
+    .agg([pl.count()])
+    .sort("count", descending=True)
+)
+    if lazy:
+        return types_predicates
+    else:
+        return types_predicates.collect()
+    
 
 def read_yago_files():
     yago_path = Path("/storage/store3/work/jstojano/yago3/")
@@ -165,19 +192,22 @@ def read_yago_files():
     return yagofacts_overall, yagotypes
 
 
-def get_subject_count_sorted(yagofacts: pl.DataFrame):
+def get_subject_count_sorted(yagofacts: pl.DataFrame, lazy=False):
     subject_count_sorted = (
         yagofacts.lazy()
         .groupby("subject")
         .agg(pl.count())
         .sort("count", descending=True)
-        .collect()
     )
-    return subject_count_sorted
+    
+    if lazy:
+        return subject_count_sorted
+    
+    return subject_count_sorted.collect()
 
 
 def get_selected_types(
-    subject_count_sorted: pl.DataFrame, yagotypes: pl.DataFrame, n_subjects=10000
+    subject_count_sorted: pl.DataFrame, yagotypes: pl.DataFrame, n_subjects=10000, lazy=True
 ):
     selected_types = (
         subject_count_sorted.lazy()
@@ -216,13 +246,54 @@ def get_selected_types(
     return selected_types
 
 
+def get_selected_types_decoupled(
+    subject_count_sorted: pl.DataFrame, yagotypes: pl.DataFrame, n_subjects=10000,
+    lazy=False
+):
+    count_objects_by_type = (
+        yagotypes.groupby("cat_object")  
+        .agg(pl.count())
+        .lazy()
+    )
+
+    subject_type_pair = (
+        subject_count_sorted.lazy()
+        .limit(n_subjects)
+        .join(yagotypes.lazy(), on="subject")
+        .select([pl.col("subject"), pl.col("cat_object")])
+    )
+
+    first_type = (
+        subject_type_pair.join(
+            count_objects_by_type,
+            on="cat_object",
+        )
+        .sort(["subject", "count"], descending=True)
+        .groupby(["subject"])
+        .agg(pl.first("cat_object").suffix("_first"))
+    )
+
+    select_most_frequent_types = (
+        first_type.groupby("cat_object_first")
+        .agg(pl.count())
+        .sort("count", descending=True)
+        .select(
+            [pl.col("cat_object_first").alias("type"), pl.col("count")],
+        )
+    )
+    if lazy:
+        return select_most_frequent_types
+    else:
+        return select_most_frequent_types.collect()
+
+
 def filter_selected_types(selected_types: pl.DataFrame, min_count):
     top_selected = selected_types.filter(pl.col("count") > min_count)
     return top_selected
 
 
 def get_subjects_in_selected_types(
-    yagofacts, selected_types, yagotypes, min_count: int = 10
+    yagofacts, selected_types, yagotypes, min_count: int = 10, lazy=True
 ):
 
     top_selected = filter_selected_types(selected_types, min_count=min_count)
@@ -236,23 +307,25 @@ def get_subjects_in_selected_types(
             left_on="subject",
             right_on="subject",
         )
-        .collect()
     )
-
-    return subjects_in_selected_types, top_selected
+    if lazy:
+        return subjects_in_selected_types, top_selected.lazy()
+    return subjects_in_selected_types.collect(), top_selected.lazy()
 
 
 def build_adj_dict(types_predicates):
-    """Build an adjacency dictionary whose keys are the types, and each 
+    """Build an adjacency dictionary whose keys are the types, and each
     value is a list of all the predicates that are connected to the type through
     some subject.
 
     Args:
-        types_predicates (pl.DataFrame): Dataframe that contains the number of type-predicate pairs. 
+        types_predicates (pl.DataFrame): Dataframe that contains the number of type-predicate pairs.
 
     Returns:
-        dict: Dictionary with pairs type-predicates. 
+        dict: Dictionary with pairs type-predicates.
     """
+    if type(types_predicates) == pl.LazyFrame:
+        types_predicates = types_predicates.collect()
     adj_dict = {}
     for row in types_predicates.iter_rows():
         left, right, _ = row
@@ -301,10 +374,15 @@ def get_tabs_by_type(yagotypes, selected_types, group_limit=10):
     if group_limit < 1:
         raise ValueError(f"`group_limit` must be > 1, got {group_limit}")
 
+    if type(selected_types) == pl.DataFrame:
+        subset_types = selected_types.head(group_limit).lazy()
+    else:
+        subset_types = selected_types.head(group_limit)
+    
     type_groups = (
         yagotypes.lazy()
         .join(
-            selected_types.head(group_limit).lazy(),  # Inner join selected types
+            subset_types,  # Inner join selected types
             left_on="cat_object",
             right_on="type",
         )

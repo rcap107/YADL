@@ -20,7 +20,7 @@ def print_row(row: dict):
     print(f"Exp: {row['experiment']} - Engine: {row['key']} - Mean: {row['mean']:.2f} - Min: {row['min']:.2f}")
 
 #%% 
-timer_runs = 10
+timer_runs = 1
 
 # %%
 yago_path = Path("/storage/store3/work/jstojano/yago3/")
@@ -111,6 +111,24 @@ with open("runs.txt", "a") as fp:
     for row in rows:
         fp.write(",".join([str(_) for _ in row.values()]) + "\n")
 
+
+# %%
+def query_most_frequent_types(df, top_k=10):
+    if type(df) == pd.DataFrame:
+        topfreq = df.value_counts("cat_object").nlargest(top_k)        
+        q = df.loc[
+            df["cat_object"].isin(topfreq.index)
+        ]["subject"]
+    elif type(df) == pl.DataFrame:
+        topfreq = df.lazy().groupby("cat_object").agg(pl.count()).top_k(10, by="count")
+        q=(df.lazy().join(topfreq, on="cat_object").select(pl.col("subject"))
+            ).collect()
+    else:
+        raise TypeError
+    
+    return q
+
+
 # %%
 ti = Timerit(num=timer_runs)
 rows = []
@@ -118,7 +136,7 @@ rows = []
 print("query_most_frequent_types")
 for engine, df in {"polars": yagotypes, "pandas": yagotypes_pd}.items():
     for timer in ti.reset(engine):
-        most_frequent_types = queries.query_most_frequent_types(yagotypes)
+        most_frequent_types = queries.query_most_frequent_types(df)
     row = {
         "experiment": "query_most_frequent_types",
         "mean": ti.mean(),
@@ -131,4 +149,6 @@ for engine, df in {"polars": yagotypes, "pandas": yagotypes_pd}.items():
 with open("runs.txt", "a") as fp:
     for row in rows:
         fp.write(",".join([str(_) for _ in row.values()]) + "\n")
+`# %%
+
 # %%

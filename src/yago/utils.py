@@ -279,7 +279,7 @@ def convert_df(df: pl.DataFrame, predicate: str):
     Returns:
         pl.DataFrame: Converted dataframe.
     """
-    return df.select(pl.col("subject"), pl.col("cat_object").alias(predicate)).lazy()
+    return df.select(pl.col("subject"), pl.col("cat_object").alias(predicate.strip("<").rstrip(">"))).lazy()
 
 
 def get_tabs_by_type(yagotypes, selected_types, group_limit=10):

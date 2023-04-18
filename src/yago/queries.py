@@ -81,11 +81,11 @@ def query_groupby_count_select_first(df: Union[pd.DataFrame, pl.DataFrame]):
     return q
 
 
-def query_most_frequent_types(df: Union[pd.DataFrame, pl.DataFrame]):
+def query_most_frequent_types(df: Union[pd.DataFrame, pl.DataFrame], top_k=10):
     if type(df) == pd.DataFrame:
-        top10freq = df.value_counts("cat_object").sort_values(ascending=False)[:10]
+        topfreq= df.nlargest(top_k, "cat_object")
         q = df.loc[
-            df["cat_object"].isin(top10freq.index)
+            df["cat_object"].isin(topfreq.index)
         ]["subject"]
     elif type(df) == pl.DataFrame:
         q=(df.lazy().filter(
@@ -96,9 +96,7 @@ def query_most_frequent_types(df: Union[pd.DataFrame, pl.DataFrame]):
                         [
                             pl.count()
                         ]
-                        ).sort(
-                            "count", descending=True
-                            ).limit(10).select(
+                        ).top_k(top_k, "count").select(
                                 pl.col("cat_object")
                                 ).collect()["cat_object"]
                 )

@@ -136,7 +136,8 @@ rows = []
 print("query_most_frequent_types")
 for engine, df in {"polars": yagotypes, "pandas": yagotypes_pd}.items():
     for timer in ti.reset(engine):
-        most_frequent_types = queries.query_most_frequent_types(df)
+        most_frequent_types = query_most_frequent_types(df)
+        # most_frequent_types = queries.query_most_frequent_types(df)
     row = {
         "experiment": "query_most_frequent_types",
         "mean": ti.mean(),
@@ -149,6 +150,5 @@ for engine, df in {"polars": yagotypes, "pandas": yagotypes_pd}.items():
 with open("runs.txt", "a") as fp:
     for row in rows:
         fp.write(",".join([str(_) for _ in row.values()]) + "\n")
-`# %%
 
 # %%

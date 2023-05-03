@@ -1,4 +1,6 @@
 telegram_credentials.txt
+kaggle.json
+data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

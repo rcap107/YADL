@@ -3,7 +3,7 @@ import polars as pl
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
-
+from matplotlib.colors import LogNorm, NoNorm
 
 
 def get_labels_from_cat_codes(df: pd.DataFrame):
@@ -11,8 +11,8 @@ def get_labels_from_cat_codes(df: pd.DataFrame):
     sorted(
         dict(
             zip(
-                df["pred_left"].cat.codes,
-                df["pred_left"],
+                df["x"].cat.codes,
+                df["x"],
             )
         ).items()
     )
@@ -22,29 +22,29 @@ def get_labels_from_cat_codes(df: pd.DataFrame):
     
 def get_numerical_coordinates(df:pd.DataFrame):
     df.columns = [
-        "pred_left",
-        "pred_right",
+        "x",
+        "y",
         "count"
     ]
     df[
-        ["pred_left", "pred_right"]
-    ] = df[["pred_left", "pred_right"]].astype(
+        ["x", "y"]
+    ] = df[["x", "y"]].astype(
         "category"
     )
     df[
-        ["pred_left_int", "pred_right_int"]
-    ] = df[["pred_left", "pred_right"]].apply(
+        ["x_int", "y_int"]
+    ] = df[["x", "y"]].apply(
         lambda x: x.cat.codes
     )
     
     return df
 
 
-def plot_pairwise_heatmap(df_count_cooccurring_predicates: pd.DataFrame):
-    df_count_cooccurring_predicates = get_numerical_coordinates(df_count_cooccurring_predicates)
+def plot_pairwise_heatmap(df_src: pd.DataFrame, lognorm=True):
+    df = get_numerical_coordinates(df_src.copy())
     
     max_category = (
-        df_count_cooccurring_predicates[["pred_left_int", "pred_right_int"]]
+        df[["x_int", "y_int"]]
         .max()
         .max()
     )
@@ -52,13 +52,16 @@ def plot_pairwise_heatmap(df_count_cooccurring_predicates: pd.DataFrame):
     # Set the proper coordinates
     zz = np.zeros((max_category + 1, max_category + 1))
     zz[
-        df_count_cooccurring_predicates["pred_left_int"],
-        df_count_cooccurring_predicates["pred_right_int"],
-    ] = df_count_cooccurring_predicates["count"]
+        df["x_int"],
+        df["y_int"],
+    ] = df["count"]
     # Set the proper labels
-    dd = get_labels_from_cat_codes(df_count_cooccurring_predicates)
+    dd = get_labels_from_cat_codes(df)
     
-    norm = LogNorm()
+    if lognorm == True:
+        norm = LogNorm()
+    else:
+        norm = NoNorm()
     fig, ax = plt.subplots(figsize=(10,10))
     sns.heatmap(
         zz,

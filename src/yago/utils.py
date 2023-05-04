@@ -180,7 +180,8 @@ def get_subject_count_sorted(yagofacts: pl.DataFrame):
 
 
 def get_selected_types(
-    subject_count_sorted: pl.DataFrame, yagotypes: pl.DataFrame, n_subjects=10000
+    subject_count_sorted: pl.DataFrame, yagotypes: pl.DataFrame, n_subjects=10000,
+    min_count=10
 ):
     selected_types = (
         subject_count_sorted.lazy()
@@ -213,27 +214,25 @@ def get_selected_types(
         .sort("count", descending=True)  # Sorting by group (for convenience)
         .select(
             [pl.col("cat_object_first").alias("type"), pl.col("count")],
-        )
+        ).filter(pl.col("count") > min_count) # filter to select only the types that are connected to 
+        # at least `min_count` subjects.
         .collect()
     )
     return selected_types
 
-
-def filter_selected_types(selected_types: pl.DataFrame, min_count):
-    top_selected = selected_types.filter(pl.col("count") > min_count)
-    return top_selected
-
-
 def get_subjects_in_selected_types(
-    yagofacts, selected_types, yagotypes, min_count: int = 10
+    yagofacts, yagotypes, n_subjects=10000, min_count: int = 10
 ):
-
-    top_selected = filter_selected_types(selected_types, min_count=min_count)
-
+    subject_count_sorted = get_subject_count_sorted(yagofacts)
+    
+    selected_types = get_selected_types(
+        subject_count_sorted, yagotypes, n_subjects=n_subjects,
+     min_count=min_count
+    )
     subjects_in_selected_types = (
         yagofacts.lazy()
         .join(
-            top_selected.lazy()
+            selected_types.lazy()
             .join(yagotypes.lazy(), left_on=["type"], right_on=["cat_object"])
             .select([pl.col("subject"), pl.col("type")]),
             left_on="subject",
@@ -242,8 +241,34 @@ def get_subjects_in_selected_types(
         .collect()
     )
 
-    return subjects_in_selected_types, top_selected
+    return subjects_in_selected_types, selected_types.rename({"cat_object": "type"})
 
+
+def get_subjects_in_wordnet_categories(
+    yagofacts,
+    yagotypes, top_k=20
+):
+    wordnet_categories = yagotypes.lazy().filter(
+        pl.col("cat_object").str.starts_with("<wordnet_")
+    ).select(
+        pl.col("cat_object").unique()
+    ).collect()
+
+    top_wordnet = yagotypes.lazy().filter(
+        pl.col("cat_object").is_in(wordnet_categories["cat_object"])
+    ).groupby("cat_object").count().top_k(k=top_k, by="count").collect()
+
+    subjects = (
+        yagofacts.lazy().join(
+            top_wordnet.lazy()
+            .join(yagotypes.lazy(), left_on=["cat_object"], right_on=["cat_object"])
+            .select([pl.col("subject"), pl.col("cat_object")]),
+            left_on="subject",
+            right_on="subject",
+        )
+        .collect()
+    )
+    return subjects, top_wordnet.rename({"cat_object": "type"})
 
 def build_adj_dict(types_predicates):
     """Build an adjacency dictionary whose keys are the types, and each

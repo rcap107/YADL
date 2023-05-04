@@ -88,7 +88,7 @@ def query_most_frequent_types(df, top_k=10):
             df["cat_object"].isin(topfreq.index)
         ]["subject"]
     elif type(df) == pl.DataFrame:
-        topfreq = df["cat_object"].value_counts().top_k(10, by="counts")
+        topfreq = df["cat_object"].value_counts().top_k(top_k, by="counts")
         q=(df.lazy().filter(pl.col("cat_object").is_in(topfreq["cat_object"])).select(pl.col("subject"))
             ).collect()
     else:

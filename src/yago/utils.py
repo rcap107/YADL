@@ -6,6 +6,9 @@ import pandas as pd
 import polars as pl
 import seaborn as sns
 from tqdm import tqdm
+import os
+
+from itertools import combinations
 
 
 def import_from_yago(filepath: Path, engine="polars"):
@@ -243,15 +246,15 @@ def get_subjects_in_selected_types(
 
 
 def build_adj_dict(types_predicates):
-    """Build an adjacency dictionary whose keys are the types, and each 
+    """Build an adjacency dictionary whose keys are the types, and each
     value is a list of all the predicates that are connected to the type through
     some subject.
 
     Args:
-        types_predicates (pl.DataFrame): Dataframe that contains the number of type-predicate pairs. 
+        types_predicates (pl.DataFrame): Dataframe that contains the number of type-predicate pairs.
 
     Returns:
-        dict: Dictionary with pairs type-predicates. 
+        dict: Dictionary with pairs type-predicates.
     """
     adj_dict = {}
     for row in types_predicates.iter_rows():
@@ -279,7 +282,9 @@ def convert_df(df: pl.DataFrame, predicate: str):
     Returns:
         pl.DataFrame: Converted dataframe.
     """
-    return df.select(pl.col("subject"), pl.col("cat_object").alias(predicate.strip("<").rstrip(">"))).lazy()
+    return df.select(
+        pl.col("subject"), pl.col("cat_object").alias(predicate.strip("<").rstrip(">"))
+    ).lazy()
 
 
 def get_tabs_by_type(yagotypes, selected_types, group_limit=10):
@@ -389,3 +394,55 @@ def save_tabs_on_file(
             new_tab.collect().write_parquet(Path(dest_path, fname))
         else:
             raise ValueError(f"Unkown output format {output_format}")
+
+
+def explode_table(
+    tgt_table: pl.DataFrame, table_name, root_dir_path, comb_size=2, min_occurrences=100
+):
+    """Explode a target YAGO table into smaller slices with no nulls.
+    All column combinations of size `comb_size` are generated, then for each
+    combination the starting table is projected over the columns in the combination.
+    The number of rows with no nulls is tallied, then only combinations with at
+    least `min_occurrences` non-null rows are kept.
+
+    Only cases where all values are non-nulls are kept.
+
+    Finally, each combination is saved into a different table, in a subdir that
+    is created starting from `dir_path`, using `table_name` as root.
+
+    Args:
+        tgt_table (pl.DataFrame): Table to work on.
+        table_name (str): Name of the table, will be used for saving the new tables.
+        comb_size (int, optional): Number of columns in each combination. Defaults to 2.
+        min_occurrences (int, optional): Minimum number of non-null values to select a pair. Defaults to 100.
+    """
+    dir_path = Path(root_dir_path, table_name)
+    os.makedirs(dir_path, exist_ok=True)
+    # Ignore columns `type` and `subject`
+    target_columns = tgt_table.columns[2:]
+    coords_dict = {}
+
+    # Counting the number of non-null occurrences for each combination of size `comb_size`
+    for comb in combinations(target_columns, comb_size):
+        tt = tgt_table.select(pl.all(pl.col(comb).is_not_null())).sum().item()
+        coords_dict[comb] = tt
+
+    df_coord = pd.DataFrame().from_dict(coords_dict, orient="index", columns=["count"])
+    df_coord = df_coord.reset_index()
+
+    # selecting only combinations with more than `min_occurrences` occs
+    rich_combs = df_coord[df_coord["count"] >= min_occurrences]
+
+    # For each comb, write a new parquet file.
+    for _, comb in rich_combs.iterrows():
+        sel_col = ["type", "subject"] + list(comb["index"])
+        res = (
+            tgt_table.filter(pl.all(pl.col(comb["index"]).is_not_null()))
+            .select(pl.col(sel_col))
+            .unique()
+        )
+
+        filename = "_".join(table_name.split("_")[2:]) + "_" + "_".join(comb["index"])
+        dest_path = Path(dir_path, filename + ".parquet")
+        print(dest_path)
+        res.write_parquet(dest_path)

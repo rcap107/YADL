@@ -142,8 +142,7 @@ def join_types_predicates(yagotypes, yagofacts, types_subset):
     return types_predicates
 
 
-def read_yago_files():
-    yago_path = Path("/storage/store3/work/jstojano/yago3/")
+def read_yago_files(yago_path=Path("/storage/store3/work/jstojano/yago3/")):
     facts1_path = Path(yago_path, "facts_parquet/yago_updated_2022_part1")
     facts2_path = Path(yago_path, "facts_parquet/yago_updated_2022_part2")
 
@@ -180,8 +179,10 @@ def get_subject_count_sorted(yagofacts: pl.DataFrame):
 
 
 def get_selected_types(
-    subject_count_sorted: pl.DataFrame, yagotypes: pl.DataFrame, n_subjects=10000,
-    min_count=10
+    subject_count_sorted: pl.DataFrame,
+    yagotypes: pl.DataFrame,
+    n_subjects=10000,
+    min_count=10,
 ):
     selected_types = (
         subject_count_sorted.lazy()
@@ -214,20 +215,23 @@ def get_selected_types(
         .sort("count", descending=True)  # Sorting by group (for convenience)
         .select(
             [pl.col("cat_object_first").alias("type"), pl.col("count")],
-        ).filter(pl.col("count") > min_count) # filter to select only the types that are connected to 
+        )
+        .filter(
+            pl.col("count") > min_count
+        )  # filter to select only the types that are connected to
         # at least `min_count` subjects.
         .collect()
     )
     return selected_types
 
+
 def get_subjects_in_selected_types(
     yagofacts, yagotypes, n_subjects=10000, min_count: int = 10
 ):
     subject_count_sorted = get_subject_count_sorted(yagofacts)
-    
+
     selected_types = get_selected_types(
-        subject_count_sorted, yagotypes, n_subjects=n_subjects,
-     min_count=min_count
+        subject_count_sorted, yagotypes, n_subjects=n_subjects, min_count=min_count
     )
     subjects_in_selected_types = (
         yagofacts.lazy()
@@ -244,22 +248,26 @@ def get_subjects_in_selected_types(
     return subjects_in_selected_types, selected_types.rename({"cat_object": "type"})
 
 
-def get_subjects_in_wordnet_categories(
-    yagofacts,
-    yagotypes, top_k=20
-):
-    wordnet_categories = yagotypes.lazy().filter(
-        pl.col("cat_object").str.starts_with("<wordnet_")
-    ).select(
-        pl.col("cat_object").unique()
-    ).collect()
+def get_subjects_in_wordnet_categories(yagofacts, yagotypes, top_k=20):
+    wordnet_categories = (
+        yagotypes.lazy()
+        .filter(pl.col("cat_object").str.starts_with("<wordnet_"))
+        .select(pl.col("cat_object").unique())
+        .collect()
+    )
 
-    top_wordnet = yagotypes.lazy().filter(
-        pl.col("cat_object").is_in(wordnet_categories["cat_object"])
-    ).groupby("cat_object").count().top_k(k=top_k, by="count").collect()
+    top_wordnet = (
+        yagotypes.lazy()
+        .filter(pl.col("cat_object").is_in(wordnet_categories["cat_object"]))
+        .groupby("cat_object")
+        .count()
+        .top_k(k=top_k, by="count")
+        .collect()
+    )
 
     subjects = (
-        yagofacts.lazy().join(
+        yagofacts.lazy()
+        .join(
             top_wordnet.lazy()
             .join(yagotypes.lazy(), left_on=["cat_object"], right_on=["cat_object"])
             .select([pl.col("subject"), pl.col("cat_object")]),
@@ -269,6 +277,7 @@ def get_subjects_in_wordnet_categories(
         .collect()
     )
     return subjects, top_wordnet.rename({"cat_object": "type"})
+
 
 def build_adj_dict(types_predicates):
     """Build an adjacency dictionary whose keys are the types, and each
@@ -382,6 +391,7 @@ def save_tabs_on_file(
     adj_dict,
     yagofacts: pl.DataFrame,
     dest_path,
+    variant_tag: str = "",
     output_format: str = "parquet",
     max_table_width: int = 15,
 ):
@@ -391,7 +401,8 @@ def save_tabs_on_file(
         tabs_by_type (dict): Dictionary that contains the "base tables" to be joined on.
         adj_dict (dict): Dictionary that lists predicates that co-occur, to avoid empty joins.
         yagofacts (pl.DataFrame): Yago facts dataframe.
-        dest_path (_type_): Root folder where all tables will be saved.
+        dest_path (str): Root folder where all tables will be saved.
+        variant_tag (str, optional): If provided, add the given tag to the table names.
         output_format (str, optional): Output format to use, either "parquet" or "csv". Defaults to "parquet".
         max_table_width (int, optional): Maximum width of the final table. Large tables can run out of memory. Defaults to 15.
 
@@ -412,13 +423,53 @@ def save_tabs_on_file(
                 )
         clean_type_str = clean_keys(type_str)
         if output_format == "csv":
-            fname = f"yago_seltab_{clean_type_str}.csv"
+            fname = f"yago{variant_tag}_{clean_type_str}.csv"
             new_tab.collect().write_csv(Path(dest_path, fname))
         elif output_format == "parquet":
-            fname = f"yago_seltab_{clean_type_str}.parquet"
+            fname = f"yago{variant_tag}_{clean_type_str}.parquet"
             new_tab.collect().write_parquet(Path(dest_path, fname))
         else:
             raise ValueError(f"Unkown output format {output_format}")
+
+
+def prepare_binary_tables(subjects_in_selected_types: pl.DataFrame, dest_path: str):
+    """Prepare a set of binary tables given the selected subjects. All new tables
+    will be saved in the column provided in `dest_path`.
+
+    Args:
+        subjects_in_selected_types (pl.DataFrame): Selected YAGO subjects prepared in previous steps.
+        dest_path (str): Path to the directory where all the subtables will be saved.
+
+    Raises:
+        FileNotFoundError: Raise FileNotFoundError if there is no directory in the `dest_path` provided.
+
+    """
+    dest_path = Path(dest_path)
+    if not dest_path.exists():
+        raise FileNotFoundError(f"Directory {dest_path} does not exist. ")
+
+    for gname, group in subjects_in_selected_types.groupby("predicate"):
+        print(f"Working on group {gname}")
+        dff = group.clone()
+        dff = dff[[s.name for s in dff if not (s.null_count() == dff.height)]]
+        col_name = gname.replace("<", "").replace(">", "")
+        new_df = None
+
+        # If num_object is present, select the numeric version of the parameter.
+        if "num_object" in dff.columns:
+            new_df = dff.with_columns(
+                pl.col("subject"), pl.col("num_object").alias(col_name)
+            ).select(pl.col("subject"), pl.col(col_name))
+        # Else, use the categorical value.
+        else:
+            new_df = dff.with_columns(
+                pl.col("subject"), pl.col("cat_object").alias(col_name)
+            ).select(pl.col("subject"), pl.col(col_name))
+        if new_df is not None:
+            df_name = f"yago_binary_{col_name}.parquet"
+            new_df.write_parquet(Path(dest_path, df_name))
+        else:
+            print(f"Something wrong with group {gname}")
 
 
 def explode_table(

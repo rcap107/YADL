@@ -248,7 +248,7 @@ def get_subjects_in_selected_types(
     return subjects_in_selected_types, selected_types.rename({"cat_object": "type"})
 
 
-def get_subjects_in_wordnet_categories(yagofacts, yagotypes, top_k=20):
+def get_subjects_in_wordnet_categories(yagofacts, yagotypes, top_k=20, cherry_picked=None):
     wordnet_categories = (
         yagotypes.lazy()
         .filter(pl.col("cat_object").str.starts_with("<wordnet_"))
@@ -264,6 +264,15 @@ def get_subjects_in_wordnet_categories(yagofacts, yagotypes, top_k=20):
         .top_k(k=top_k, by="count")
         .collect()
     )
+    
+    if cherry_picked is not None:
+        cherry_picked_types = (yagotypes.lazy()
+        .filter(pl.col("cat_object").is_in(cherry_picked))
+        .groupby("cat_object")
+        .count()
+        .top_k(k=top_k, by="count")
+        .collect())
+        top_wordnet = pl.concat([top_wordnet, cherry_picked_types])
 
     subjects = (
         yagofacts.lazy()
@@ -510,6 +519,8 @@ def explode_table(
     rich_combs = df_coord[df_coord["count"] >= min_occurrences]
 
     # For each comb, write a new parquet file.
+    written=0
+    skipped=0
     for _, comb in rich_combs.iterrows():
         sel_col = ["type", "subject"] + list(comb["index"])
         res = (
@@ -520,5 +531,26 @@ def explode_table(
 
         filename = "_".join(table_name.split("_")[2:]) + "_" + "_".join(comb["index"])
         dest_path = Path(dir_path, filename + ".parquet")
-        print(dest_path)
-        res.write_parquet(dest_path)
+        # print(dest_path)
+        if len(res) > min_occurrences:
+            res.write_parquet(dest_path)
+            written+=1
+        else:
+            skipped+=1
+    print(f"Written: {written} Skipped: {skipped}")
+
+
+def prepare_combinations(args):
+    src_path = Path(args.data_dir)
+    for tpath in src_path.iterdir():
+        if not tpath.is_dir():
+            tab_name = tpath.stem
+            tab = pl.read_parquet(tpath)
+            for csize in args.comb_size:
+                explode_table(
+                    tab,
+                    tab_name,
+                    root_dir_path=args.data_dir,
+                    comb_size=csize,
+                    min_occurrences=args.min_count,
+                )

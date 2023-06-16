@@ -11,27 +11,36 @@ import os
 from itertools import combinations
 
 
-def import_from_yago(filepath: Path, engine="polars"):
+def cast_features(table: pl.DataFrame):
+    """This function takes a given `table` as input and tries to convert all attributes to numeric. Any attribute that
+    raises an exception keeps its type.
+
+    Args:
+        table (pl.DataFrame): Table to convert.
+
+    Returns:
+        pl.DataFrame: Table with casted types.
+    """
+    if not only_types:
+        for col in table.columns:
+            try:
+                table = table.with_columns(pl.col(col).cast(pl.Float64))
+            except pl.ComputeError:
+                continue
+
+    return table
+
+
+def import_from_yago(filepath: Path):
     """Given a parquet file, read it assuming YAGO format. The last row is dropped.
-    Polars and Pandas are supported as engines.
 
     Args:
         filepath (Path): Path to the yago-like file.
-        engine (str, optional): Dataframe engine to use. Defaults to "polars".
-
-    Raises:
-        ValueError: Raise ValueError if the supplied engine is not `pandas` or `polars`.
 
     Returns:
         _type_: Triplets DataFrame.
     """
-    if engine == "polars":
-        triplets = pl.read_parquet(filepath)[:-1]
-    elif engine == "pandas":
-        triplets = pd.read_parquet(filepath)
-        triplets.drop(triplets.tail(1).index, inplace=True)
-    else:
-        raise ValueError(f"Unknown engine {engine}")
+    triplets = pl.read_parquet(filepath)[:-1]
     triplets.columns = ["id", "subject", "predicate", "cat_object", "num_object"]
     return triplets
 
@@ -122,6 +131,17 @@ def get_count_cooccurring_predicates(df: pl.DataFrame):
 
 
 def join_types_predicates(yagotypes, yagofacts, types_subset):
+    """Find all the YAGO type/YAGO predicate pairs (i.e. all the predicates that are connected to a subject with the 
+    given type).
+
+    Args:
+        yagotypes (pl.DataFrame): Dataframe containing the YAGO types.
+        yagofacts (pl.DataFrame): Dataframe containing the YAGO facts.
+        types_subset (pl.DataFrame): Dataframe containing the selected types. 
+
+    Returns:
+        pl.DataFrame: Dataframe containing all pairs type-predicate, and the number of time they appear.
+    """
     types_predicates = (
         yagotypes.lazy()
         .filter(pl.col("cat_object").is_in(types_subset["type"]))
@@ -148,34 +168,23 @@ def read_yago_files(yago_path=Path("/storage/store3/work/jstojano/yago3/")):
 
     fname = "yagoTypes"
     yagotypes_path = Path(facts1_path, f"{fname}.tsv.parquet")
-    yagotypes = import_from_yago(yagotypes_path, engine="polars")
+    yagotypes = import_from_yago(yagotypes_path)
 
     fname = "yagoFacts"
     yagofacts_path = Path(facts2_path, f"{fname}.tsv.parquet")
-    yagofacts = import_from_yago(yagofacts_path, engine="polars")
+    yagofacts = import_from_yago(yagofacts_path)
 
     fname = "yagoLiteralFacts"
     yagoliteralfacts_path = Path(facts2_path, f"{fname}.tsv.parquet")
-    yagoliteralfacts = import_from_yago(yagoliteralfacts_path, engine="polars")
+    yagoliteralfacts = import_from_yago(yagoliteralfacts_path)
 
     fname = "yagoDateFacts"
     yagodatefacts_path = Path(facts2_path, f"{fname}.tsv.parquet")
-    yagodatefacts = import_from_yago(yagodatefacts_path, engine="polars")
+    yagodatefacts = import_from_yago(yagodatefacts_path)
 
     yagofacts_overall = pl.concat([yagofacts, yagoliteralfacts, yagodatefacts])
 
     return yagofacts_overall, yagotypes
-
-
-def get_subject_count_sorted(yagofacts: pl.DataFrame):
-    subject_count_sorted = (
-        yagofacts.lazy()
-        .groupby("subject")
-        .agg(pl.count())
-        .sort("count", descending=True)
-        .collect()
-    )
-    return subject_count_sorted
 
 
 def get_selected_types(
@@ -225,10 +234,16 @@ def get_selected_types(
     return selected_types
 
 
-def get_subjects_in_selected_types(
+def prepare_subjects_types_seltab(
     yagofacts, yagotypes, n_subjects=10000, min_count: int = 10
 ):
-    subject_count_sorted = get_subject_count_sorted(yagofacts)
+    subject_count_sorted = (
+        yagofacts.lazy()
+        .groupby("subject")
+        .agg(pl.count())
+        .sort("count", descending=True)
+        .collect()
+    )
 
     selected_types = get_selected_types(
         subject_count_sorted, yagotypes, n_subjects=n_subjects, min_count=min_count
@@ -248,30 +263,42 @@ def get_subjects_in_selected_types(
     return subjects_in_selected_types, selected_types.rename({"cat_object": "type"})
 
 
-def get_subjects_in_wordnet_categories(yagofacts, yagotypes, top_k=20, cherry_picked=None):
-    wordnet_categories = (
-        yagotypes.lazy()
-        .filter(pl.col("cat_object").str.starts_with("<wordnet_"))
-        .select(pl.col("cat_object").unique())
-        .collect()
-    )
+def prepare_subjects_types_wordnet(
+    yagofacts, yagotypes, top_k=20, cherry_picked=None
+):
+    """Select only the subjects that are connected to the `top_k` wordnet categories. If `cherry_picked` is not None,
+    add subjects that are connected to the categories in `cherry_picked`, if they are not already in the collection of
+    subjects.
+
+    Args:
+        yagofacts (pl.DataFrame): Dataframe containing YAGO facts.
+        yagotypes (pl.DataFrame): Dataframe containing YAGO types (i.e. categories).
+        top_k (int, optional): Number of types to consider. Defaults to 20.
+        cherry_picked (list, optional): List of types to add, if not found by the heuristic.. Defaults to None.
+
+    Returns:
+        (pl.DataFrame, pl.DataFrame): A tuple that contains the subjects to use and the wordnet categories to consider
+        for the next steps.
+    """
 
     top_wordnet = (
         yagotypes.lazy()
-        .filter(pl.col("cat_object").is_in(wordnet_categories["cat_object"]))
+        .filter(pl.col("cat_object").str.starts_with("<wordnet_"))
         .groupby("cat_object")
         .count()
         .top_k(k=top_k, by="count")
         .collect()
     )
-    
+
     if cherry_picked is not None:
-        cherry_picked_types = (yagotypes.lazy()
-        .filter(pl.col("cat_object").is_in(cherry_picked))
-        .groupby("cat_object")
-        .count()
-        .top_k(k=top_k, by="count")
-        .collect())
+        cherry_picked_types = (
+            yagotypes.lazy()
+            .filter(pl.col("cat_object").is_in(cherry_picked))
+            .groupby("cat_object")
+            .count()
+            .top_k(k=top_k, by="count")
+            .collect()
+        )
         top_wordnet = pl.concat([top_wordnet, cherry_picked_types])
 
     subjects = (
@@ -282,6 +309,11 @@ def get_subjects_in_wordnet_categories(yagofacts, yagotypes, top_k=20, cherry_pi
             .select([pl.col("subject"), pl.col("cat_object")]),
             left_on="subject",
             right_on="subject",
+        )
+        .with_columns(
+            pl.when(pl.col("num_object").is_null())
+            .then(pl.col("cat_object").alias("cat_object"))
+            .otherwise(pl.col("num_object").alias("cat_object"))
         )
         .collect()
     )
@@ -326,7 +358,10 @@ def convert_df(df: pl.DataFrame, predicate: str):
         pl.DataFrame: Converted dataframe.
     """
     return df.select(
-        pl.col("subject"), pl.col("cat_object").alias(predicate.strip("<").rstrip(">"))
+        pl.col("subject"),
+        pl.when(pl.col("num_object").is_not_null())
+        .then(pl.col("num_object").alias(predicate.strip("<").rstrip(">")))
+        .otherwise(pl.col("cat_object").alias(predicate.strip("<").rstrip(">"))),
     ).lazy()
 
 
@@ -431,12 +466,13 @@ def save_tabs_on_file(
                     transformed_tab.lazy(), on="subject", how="left"
                 )
         clean_type_str = clean_keys(type_str)
+        new_tab = cast_features(new_tab.collect())
         if output_format == "csv":
             fname = f"yago{variant_tag}_{clean_type_str}.csv"
-            new_tab.collect().write_csv(Path(dest_path, fname))
+            new_tab.write_csv(Path(dest_path, fname))
         elif output_format == "parquet":
             fname = f"yago{variant_tag}_{clean_type_str}.parquet"
-            new_tab.collect().write_parquet(Path(dest_path, fname))
+            new_tab.write_parquet(Path(dest_path, fname))
         else:
             raise ValueError(f"Unkown output format {output_format}")
 
@@ -519,8 +555,8 @@ def explode_table(
     rich_combs = df_coord[df_coord["count"] >= min_occurrences]
 
     # For each comb, write a new parquet file.
-    written=0
-    skipped=0
+    written = 0
+    skipped = 0
     for _, comb in rich_combs.iterrows():
         sel_col = ["type", "subject"] + list(comb["index"])
         res = (
@@ -534,9 +570,9 @@ def explode_table(
         # print(dest_path)
         if len(res) > min_occurrences:
             res.write_parquet(dest_path)
-            written+=1
+            written += 1
         else:
-            skipped+=1
+            skipped += 1
     print(f"Written: {written} Skipped: {skipped}")
 
 

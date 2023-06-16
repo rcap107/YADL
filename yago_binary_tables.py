@@ -12,7 +12,7 @@ dest_dir = Path("data/yago3-dl/binary")
 
 n_type_tabs = 20
 print(f"Extracting the top {n_type_tabs} subjects.")
-subjects_in_selected_types, _ = utils.get_subjects_in_wordnet_categories(
+subjects_in_selected_types, _ = utils.prepare_subjects_types_wordnet(
     yagofacts, yagotypes, top_k=n_type_tabs
 )
 

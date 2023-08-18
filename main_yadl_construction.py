@@ -80,7 +80,11 @@ def parse_args():
         help="If `strategy` is `custom`, path where the custom types are stored.",
     )
 
-
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="If set, downsample the yago tables to 100_000 values to reduce runtime. "
+    )
 
 
     args = parser.parse_args()
@@ -227,7 +231,7 @@ if __name__ == "__main__":
     strategy = args.strategy
 
     print("Reading files")
-    yagofacts, yagotypes = utils.read_yago_files()
+    yagofacts, yagotypes = utils.read_yago_files(debug=args.debug)
     if strategy == "wordnet_cp":
         cherry_picked = read_cherry_picked(args.cherry_pick_path)
     else:

@@ -27,7 +27,7 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
- 4 -d DATA_DIR, --data_dir DATA_DIR
+  -d DATA_DIR, --data_dir DATA_DIR
                         Root path to save new tables in.
   --top_k TOP_K         The top k types by number of occurrences will be selected.
   --min_count MIN_COUNT

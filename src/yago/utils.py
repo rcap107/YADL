@@ -21,12 +21,11 @@ def cast_features(table: pl.DataFrame):
     Returns:
         pl.DataFrame: Table with casted types.
     """
-    if not only_types:
-        for col in table.columns:
-            try:
-                table = table.with_columns(pl.col(col).cast(pl.Float64))
-            except pl.ComputeError:
-                continue
+    for col in table.columns:
+        try:
+            table = table.with_columns(pl.col(col).cast(pl.Float64))
+        except pl.ComputeError:
+            continue
 
     return table
 
@@ -131,13 +130,13 @@ def get_count_cooccurring_predicates(df: pl.DataFrame):
 
 
 def join_types_predicates(yagotypes, yagofacts, types_subset):
-    """Find all the YAGO type/YAGO predicate pairs (i.e. all the predicates that are connected to a subject with the 
+    """Find all the YAGO type/YAGO predicate pairs (i.e. all the predicates that are connected to a subject with the
     given type).
 
     Args:
         yagotypes (pl.DataFrame): Dataframe containing the YAGO types.
         yagofacts (pl.DataFrame): Dataframe containing the YAGO facts.
-        types_subset (pl.DataFrame): Dataframe containing the selected types. 
+        types_subset (pl.DataFrame): Dataframe containing the selected types.
 
     Returns:
         pl.DataFrame: Dataframe containing all pairs type-predicate, and the number of time they appear.
@@ -162,7 +161,9 @@ def join_types_predicates(yagotypes, yagofacts, types_subset):
     return types_predicates
 
 
-def read_yago_files(yago_path=Path("/storage/store3/work/jstojano/yago3/")):
+def read_yago_files(
+    yago_path=Path("/storage/store3/work/jstojano/yago3/"), debug=False
+):
     facts1_path = Path(yago_path, "facts_parquet/yago_updated_2022_part1")
     facts2_path = Path(yago_path, "facts_parquet/yago_updated_2022_part2")
 
@@ -173,6 +174,7 @@ def read_yago_files(yago_path=Path("/storage/store3/work/jstojano/yago3/")):
     fname = "yagoFacts"
     yagofacts_path = Path(facts2_path, f"{fname}.tsv.parquet")
     yagofacts = import_from_yago(yagofacts_path)
+    yagofacts = yagofacts.drop("num_object")
 
     fname = "yagoLiteralFacts"
     yagoliteralfacts_path = Path(facts2_path, f"{fname}.tsv.parquet")
@@ -181,6 +183,31 @@ def read_yago_files(yago_path=Path("/storage/store3/work/jstojano/yago3/")):
     fname = "yagoDateFacts"
     yagodatefacts_path = Path(facts2_path, f"{fname}.tsv.parquet")
     yagodatefacts = import_from_yago(yagodatefacts_path)
+    if debug:
+        yagofacts = yagofacts.sample(10_000)
+        yagoliteralfacts = yagoliteralfacts.sample(10_000)
+        yagodatefacts = yagodatefacts.sample(10_000)
+
+    # Keeping only complete dates and removing dates with no month/day 
+    yagodatefacts = (
+        yagodatefacts.with_columns(
+            pl.col("cat_object")
+            .str.split("^^")
+            .list.first()
+            .str.to_datetime(strict=False).dt.date().cast(pl.Utf8)
+        )
+        .drop_nulls("cat_object")
+        .drop("num_object")
+    )
+
+    # Keeping only the numerical version of the fact
+    yagoliteralfacts = yagoliteralfacts.with_columns(
+        pl.when(pl.col("num_object").is_not_null())
+        .then(pl.col("num_object"))
+        .otherwise(pl.col("cat_object"))
+        .alias("cat_object")
+        .cast(pl.Utf8)
+    ).drop("num_object")
 
     yagofacts_overall = pl.concat([yagofacts, yagoliteralfacts, yagodatefacts])
 
@@ -263,9 +290,7 @@ def prepare_subjects_types_seltab(
     return subjects_in_selected_types, selected_types.rename({"cat_object": "type"})
 
 
-def prepare_subjects_types_wordnet(
-    yagofacts, yagotypes, top_k=20, cherry_picked=None
-):
+def prepare_subjects_types_wordnet(yagofacts, yagotypes, top_k=20, cherry_picked=None):
     """Select only the subjects that are connected to the `top_k` wordnet categories. If `cherry_picked` is not None,
     add subjects that are connected to the categories in `cherry_picked`, if they are not already in the collection of
     subjects.
@@ -310,11 +335,6 @@ def prepare_subjects_types_wordnet(
             left_on="subject",
             right_on="subject",
         )
-        .with_columns(
-            pl.when(pl.col("num_object").is_null())
-            .then(pl.col("cat_object").alias("cat_object"))
-            .otherwise(pl.col("num_object").alias("cat_object"))
-        )
         .collect()
     )
     return subjects, top_wordnet.rename({"cat_object": "type"})
@@ -358,10 +378,8 @@ def convert_df(df: pl.DataFrame, predicate: str):
         pl.DataFrame: Converted dataframe.
     """
     return df.select(
-        pl.col("subject"),
-        pl.when(pl.col("num_object").is_not_null())
-        .then(pl.col("num_object").alias(predicate.strip("<").rstrip(">")))
-        .otherwise(pl.col("cat_object").alias(predicate.strip("<").rstrip(">"))),
+        pl.col("subject"),  
+        pl.col("cat_object").alias(predicate.strip("<").rstrip(">")),
     ).lazy()
 
 
@@ -545,14 +563,14 @@ def explode_table(
 
     # Counting the number of non-null occurrences for each combination of size `comb_size`
     for comb in combinations(target_columns, comb_size):
-        tt = tgt_table.select(pl.all(pl.col(comb).is_not_null())).sum().item()
+        tt = tgt_table.select(pl.sum(pl.col(comb).is_not_null()) > 0).sum().item()
         coords_dict[comb] = tt
 
     df_coord = pd.DataFrame().from_dict(coords_dict, orient="index", columns=["count"])
     df_coord = df_coord.reset_index()
 
     # selecting only combinations with more than `min_occurrences` occs
-    rich_combs = df_coord[df_coord["count"] >= min_occurrences]
+    rich_combs = df_coord.loc[df_coord["count"] >= min_occurrences]
 
     # For each comb, write a new parquet file.
     written = 0
@@ -560,7 +578,7 @@ def explode_table(
     for _, comb in rich_combs.iterrows():
         sel_col = ["type", "subject"] + list(comb["index"])
         res = (
-            tgt_table.filter(pl.all(pl.col(comb["index"]).is_not_null()))
+            tgt_table.filter(pl.sum(pl.col(comb["index"]).is_not_null()) > 0)
             .select(pl.col(sel_col))
             .unique()
         )
@@ -573,7 +591,7 @@ def explode_table(
             written += 1
         else:
             skipped += 1
-    print(f"Written: {written} Skipped: {skipped}")
+    print(f"Table {table_name} - {written} sub-tables prepared - {skipped} sub-tables smaller than threshold")
 
 
 def prepare_combinations(args):

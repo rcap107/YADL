@@ -1,6 +1,8 @@
-import pandas as pd
 from typing import Union
+
+import pandas as pd
 import polars as pl
+
 
 def query_find_unique_predicates(df: Union[pd.DataFrame, pl.DataFrame]):
     """Given a triplet dataframe, return the unique values in column `predicate`.
@@ -58,42 +60,38 @@ def query_count_occurrences_by_columns(
     else:
         raise TypeError("Inappropriate dataframe type.")
 
+
 def query_groupby_count_select_first(df: Union[pd.DataFrame, pl.DataFrame]):
     if type(df) == pl.DataFrame:
-        q = (df.lazy().groupby(
-        "subject"
-            ).agg(
-                [
-                    pl.first("cat_object"),
-                    pl.count()
-                ]
-            ).sort("count", descending=True).collect())
+        q = (
+            df.lazy()
+            .groupby("subject")
+            .agg([pl.first("cat_object"), pl.count()])
+            .sort("count", descending=True)
+            .collect()
+        )
     elif type(df) == pd.DataFrame:
-        q=(df.groupby("subject")["cat_object"].agg(
-            [
-                "first",
-                "count"
-            ]
-        ).reset_index())
+        q = df.groupby("subject")["cat_object"].agg(["first", "count"]).reset_index()
     else:
         raise TypeError
-    
+
     return q
 
 
 def query_most_frequent_types(df, top_k=10):
     if type(df) == pd.DataFrame:
-        topfreq = df.value_counts("cat_object").nlargest(top_k)        
-        q = df.loc[
-            df["cat_object"].isin(topfreq.index)
-        ]["subject"]
+        topfreq = df.value_counts("cat_object").nlargest(top_k)
+        q = df.loc[df["cat_object"].isin(topfreq.index)]["subject"]
     elif type(df) == pl.DataFrame:
         topfreq = df["cat_object"].value_counts().top_k(top_k, by="counts")
-        q=(df.lazy().filter(pl.col("cat_object").is_in(topfreq["cat_object"])).select(pl.col("subject"))
-            ).collect()
+        q = (
+            df.lazy()
+            .filter(pl.col("cat_object").is_in(topfreq["cat_object"]))
+            .select(pl.col("subject"))
+        ).collect()
     else:
         raise TypeError
-    
+
     return q
 
 
@@ -104,7 +102,8 @@ def select_only_frequent_types(df: Union[pd.DataFrame, pl.DataFrame]):
         pass
     else:
         raise TypeError
-    
+
+
 def select_cooccurring_predicates(df: Union[pd.DataFrame, pl.DataFrame]):
     if type(df) == pl.DataFrame:
         pass
@@ -112,7 +111,8 @@ def select_cooccurring_predicates(df: Union[pd.DataFrame, pl.DataFrame]):
         pass
     else:
         raise TypeError
-    
+
+
 # def most_frequent_types(df: Union[pd.DataFrame, pl.DataFrame]):
 #     if type(df) == pl.DataFrame:
 #         pass
@@ -120,7 +120,7 @@ def select_cooccurring_predicates(df: Union[pd.DataFrame, pl.DataFrame]):
 #         pass
 #     else:
 #         raise TypeError
-    
+
 # def most_frequent_types(df: Union[pd.DataFrame, pl.DataFrame]):
 #     if type(df) == pl.DataFrame:
 #         pass
@@ -128,4 +128,3 @@ def select_cooccurring_predicates(df: Union[pd.DataFrame, pl.DataFrame]):
 #         pass
 #     else:
 #         raise TypeError
-    

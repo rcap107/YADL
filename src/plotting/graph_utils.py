@@ -1,7 +1,7 @@
-import numpy as np
-import plotly.graph_objects as go
 import networkx as nx
+import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 
 
 def plot_bipartite_type_pred_graph(df: pd.DataFrame):
@@ -11,10 +11,9 @@ def plot_bipartite_type_pred_graph(df: pd.DataFrame):
     G = nx.Graph()
     for edge in df.iter_rows():
         left, right, weight = edge
-        G.add_edge(left,right, weight=weight)
+        G.add_edge(left, right, weight=weight)
     left, right = df["type"], df["predicate"]
     plot_graph(G, left, right)
-
 
 
 # Function used to prepare the node layout for the graph picture.

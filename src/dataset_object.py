@@ -1,17 +1,19 @@
-"""I am writing this script to put together the objects I need to build the new 
+"""I am writing this script to put together the objects I need to build the new
 directory tree and all the files involved."""
 
-from pathlib import Path
-import os
-import json
 import hashlib
+import io
+import json
+import os
 import shutil
+from pathlib import Path
+
+import joblib
+import pandas as pd
 import pyarrow as pa
 import pyarrow.csv as pcsv
 import pyarrow.parquet as pq
-import joblib
-import io
-import pandas as pd
+
 
 def dump_table_to_csv(idx, table_path, dest_dir):
     try:
@@ -31,6 +33,7 @@ def dump_table_to_csv(idx, table_path, dest_dir):
         # Avoid stopping the conversion procedure, count thefailures.
         return (idx, 1)
 
+
 def prepare_hash(fp, block_size=2**20):
     md5 = hashlib.md5()
     while True:
@@ -40,6 +43,7 @@ def prepare_hash(fp, block_size=2**20):
         md5.update(data)
     return md5.hexdigest()
 
+
 class Dataset:
     def __init__(self, dataset_name, src_path, dest_path):
         self.name = dataset_name
@@ -48,35 +52,36 @@ class Dataset:
 
         self.data, self.metadata, self.auxiliary_data = self.load_data()
         self.hash = self.get_hash()
-        
+
         self.path_dir = Path(dest_path, self.hash)
         self.path_tables = Path(self.path_dir, "tables")
         self.path_metadata = Path(self.path_dir, "metadata")
-        
+
         self.make_dirtree()
-        
+
     def load_data(self):
         raise NotImplementedError("Please implement this method.")
-        
+
     def get_hash(self):
         raise NotImplementedError("Please implement this method.")
-    
+
     def make_dirtree(self):
         os.makedirs(self.path_dir, exist_ok=True)
         os.makedirs(self.path_tables, exist_ok=True)
         os.makedirs(self.path_metadata, exist_ok=True)
-        
+
         open(Path(self.path_metadata, f"{self.hash}.metadata.json"), "w")
         open(Path(self.path_metadata, f"{self.hash}.problem.json"), "w")
         open(Path(self.path_metadata, f"{self.hash}.candidates.json"), "w")
-        
+
 
 class SeedDataset(Dataset):
     """Assumes D3M folder structure"""
+
     def __init__(self, dataset_name, src_path, dest_path):
         super().__init__(dataset_name, src_path, dest_path)
         self.copy_data()
-        
+
     def load_data(self):
         src_tables_path = Path(self.src_path, f"{self.name}_dataset/tables")
         src_metadata_path = Path(self.src_path, f"{self.name}_dataset/datasetDoc.json")
@@ -89,54 +94,61 @@ class SeedDataset(Dataset):
             else:
                 aux_d = pd.read_csv(ff)
                 auxiliary_data.append(aux_d)
-                
+
         assert data is not None
-        
-        metadata = json.load(open(src_metadata_path, 'r'))                
-        
+
+        metadata = json.load(open(src_metadata_path, "r"))
+
         return data, metadata, auxiliary_data
-        
+
     def get_hash(self):
         dummy = io.BytesIO(self.data.to_csv(index=False).encode())
         hash = prepare_hash(dummy)
         dummy.close()
-        
+
         return hash
-        
+
     def copy_data(self):
         src_tables_path = Path(self.src_path, f"{self.name}_dataset/tables")
         for ff in os.listdir(src_tables_path):
             shutil.copy(Path(src_tables_path, ff), Path(self.path_tables, ff))
-        
+
         src_metadata_path = Path(self.src_path, f"{self.name}_dataset/datasetDoc.json")
-        shutil.copy(Path(src_metadata_path), Path(self.path_metadata, f"{self.hash}.metadata.json"))
-        
+        shutil.copy(
+            Path(src_metadata_path),
+            Path(self.path_metadata, f"{self.hash}.metadata.json"),
+        )
+
         src_problem_path = Path(self.src_path, f"{self.name}_problem/problemDoc.json")
-        shutil.copy(Path(src_problem_path), Path(self.path_metadata, f"{self.hash}.problem.json"))
-        
+        shutil.copy(
+            Path(src_problem_path),
+            Path(self.path_metadata, f"{self.hash}.problem.json"),
+        )
+
+
 class GitTablesDataset(Dataset):
-    def __init__(self, dataset_name, dataset_hash, src_path):        
+    def __init__(self, dataset_name, dataset_hash, src_path):
         super().__init__(dataset_name, dataset_hash, src_path)
-        
+
     def load_data(self):
-        # TODO Implement this 
-        pass    
-    
+        # TODO Implement this
+        pass
+
     def get_hash(self):
         # TODO Implement this
         pass
-    
+
     def unpack_parquet(self):
         # TODO
         # table = parquet read
         # metadata = table.metadata
         # data = table.data
-        
+
         # hash data
         # set hash for path
         # copy metadata
         # copy data
-        
+
         try:
 
             # Reading single table from parquet file
@@ -146,7 +158,7 @@ class GitTablesDataset(Dataset):
             dummy = io.BytesIO(tab.to_pandas().to_csv(index=False).encode())
             self.hash = prepare_hash(dummy)
             dummy.close()
-            
+
             # Saving csv
             path_table = Path(self.dest_path, self.hash, "tables", self.name + ".csv")
             if path_table.exists():
@@ -154,26 +166,21 @@ class GitTablesDataset(Dataset):
                 return (idx, 0)
             pcsv.write_csv(tab, path_table)
 
-            path_metadata = Path(self.dest_path, self.hash, "metadata", self.name + "metadata.json")
-            decoded = {k.decode(): v.decode() for k,v in tab.schema.metadata.items()}
-            json.dump(decoded, open(path_metadata))                       
+            path_metadata = Path(
+                self.dest_path, self.hash, "metadata", self.name + "metadata.json"
+            )
+            decoded = {k.decode(): v.decode() for k, v in tab.schema.metadata.items()}
+            json.dump(decoded, open(path_metadata))
             return (idx, 0)
         except Exception:
             # Avoid stopping the conversion procedure, count thefailures.
             return (idx, 1)
 
 
-        
-
-        
 def build_dirtree(root="."):
     os.makedirs(Path(root, "seed_datasets"), exist_ok=True)
-    
+
     os.makedirs(Path(root, "datalake", exist_ok=True))
-    
-
-
-
 
 
 with open("small_set.txt", "r") as fp:

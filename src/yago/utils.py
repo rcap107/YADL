@@ -1,4 +1,6 @@
+import os
 import re
+from itertools import combinations
 from pathlib import Path
 from typing import Union
 
@@ -6,9 +8,6 @@ import pandas as pd
 import polars as pl
 import seaborn as sns
 from tqdm import tqdm
-import os
-
-from itertools import combinations
 
 
 def cast_features(table: pl.DataFrame):
@@ -188,13 +187,15 @@ def read_yago_files(
         yagoliteralfacts = yagoliteralfacts.sample(10_000)
         yagodatefacts = yagodatefacts.sample(10_000)
 
-    # Keeping only complete dates and removing dates with no month/day 
+    # Keeping only complete dates and removing dates with no month/day
     yagodatefacts = (
         yagodatefacts.with_columns(
             pl.col("cat_object")
             .str.split("^^")
             .list.first()
-            .str.to_datetime(strict=False).dt.date().cast(pl.Utf8)
+            .str.to_datetime(strict=False)
+            .dt.date()
+            .cast(pl.Utf8)
         )
         .drop_nulls("cat_object")
         .drop("num_object")
@@ -378,7 +379,7 @@ def convert_df(df: pl.DataFrame, predicate: str):
         pl.DataFrame: Converted dataframe.
     """
     return df.select(
-        pl.col("subject"),  
+        pl.col("subject"),
         pl.col("cat_object").alias(predicate.strip("<").rstrip(">")),
     ).lazy()
 
@@ -591,7 +592,9 @@ def explode_table(
             written += 1
         else:
             skipped += 1
-    print(f"Table {table_name} - {written} sub-tables prepared - {skipped} sub-tables smaller than threshold")
+    print(
+        f"Table {table_name} - {written} sub-tables prepared - {skipped} sub-tables smaller than threshold"
+    )
 
 
 def prepare_combinations(args):

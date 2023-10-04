@@ -1,9 +1,10 @@
+import argparse
+import os
 from pathlib import Path
 
-import src.yago.utils as utils
-import os
-import argparse
 import polars as pl
+
+import src.yago.utils as utils
 
 
 def parse_args():
@@ -71,7 +72,6 @@ def parse_args():
         help="If `strategy` is `custom`, path where the custom subjects are stored.",
     )
 
-
     parser.add_argument(
         "--custom_types_path",
         action="store",
@@ -83,9 +83,8 @@ def parse_args():
     parser.add_argument(
         "--debug",
         action="store_true",
-        help="If set, downsample the yago tables to 100_000 values to reduce runtime. "
+        help="If set, downsample the yago tables to 100_000 values to reduce runtime. ",
     )
-
 
     args = parser.parse_args()
 
@@ -145,8 +144,8 @@ def prepare_subtables(
 def get_selected_subjects_types(
     yagofacts, yagotypes, strategy="wordnet", top_k=20, min_count=10, cherry_picked=None
 ):
-    """Extract a subset of types and subjects from YAGO to use when building the tables. Different values for `strategy` 
-    can be used. 
+    """Extract a subset of types and subjects from YAGO to use when building the tables. Different values for `strategy`
+    can be used.
 
     Args:
         yagofacts (_type_): _description_
@@ -163,18 +162,12 @@ def get_selected_subjects_types(
         _type_: _description_
     """
     if strategy in ["wordnet", "wordnet_cp", "binary"]:
-        (
-            subjects,
-            types,
-        ) = utils.prepare_subjects_types_wordnet(
+        (subjects, types,) = utils.prepare_subjects_types_wordnet(
             yagofacts, yagotypes, top_k=top_k, cherry_picked=cherry_picked
         )
 
     elif strategy == "seltab":
-        (
-            subjects,
-            types,
-        ) = utils.prepare_subjects_types_seltab(
+        (subjects, types,) = utils.prepare_subjects_types_seltab(
             yagofacts, yagotypes, min_count=min_count
         )
     else:
@@ -183,10 +176,7 @@ def get_selected_subjects_types(
     return subjects, types
 
 
-def read_custom_subjects_types(
-    path_subjects,
-    path_types
-):
+def read_custom_subjects_types(path_subjects, path_types):
     path_subjects = Path(path_subjects)
     path_types = Path(path_types)
 

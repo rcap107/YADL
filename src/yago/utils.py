@@ -29,7 +29,7 @@ def cast_features(table: pl.DataFrame):
     return table
 
 
-def import_from_yago(filepath: Path):
+def import_from_yago(filepath: Path, debug=False):
     """Given a parquet file, read it assuming YAGO format. The last row is dropped.
 
     Args:
@@ -38,6 +38,8 @@ def import_from_yago(filepath: Path):
     Returns:
         _type_: Triplets DataFrame.
     """
+    if debug:
+        triplets = pl.scan_parquet(filepath, n_rows=100_000).collect().sample(10_000)
     triplets = pl.read_parquet(filepath)[:-1]
     triplets.columns = ["id", "subject", "predicate", "cat_object", "num_object"]
     return triplets
@@ -168,20 +170,20 @@ def read_yago_files(
 
     fname = "yagoTypes"
     yagotypes_path = Path(facts1_path, f"{fname}.tsv.parquet")
-    yagotypes = import_from_yago(yagotypes_path)
+    yagotypes = import_from_yago(yagotypes_path, debug=debug)
 
     fname = "yagoFacts"
     yagofacts_path = Path(facts2_path, f"{fname}.tsv.parquet")
-    yagofacts = import_from_yago(yagofacts_path)
+    yagofacts = import_from_yago(yagofacts_path, debug=debug)
     yagofacts = yagofacts.drop("num_object")
 
     fname = "yagoLiteralFacts"
     yagoliteralfacts_path = Path(facts2_path, f"{fname}.tsv.parquet")
-    yagoliteralfacts = import_from_yago(yagoliteralfacts_path)
+    yagoliteralfacts = import_from_yago(yagoliteralfacts_path, debug=debug)
 
     fname = "yagoDateFacts"
     yagodatefacts_path = Path(facts2_path, f"{fname}.tsv.parquet")
-    yagodatefacts = import_from_yago(yagodatefacts_path)
+    yagodatefacts = import_from_yago(yagodatefacts_path, debug=debug)
     if debug:
         yagofacts = yagofacts.sample(10_000)
         yagoliteralfacts = yagoliteralfacts.sample(10_000)
@@ -487,10 +489,10 @@ def save_tabs_on_file(
         clean_type_str = clean_keys(type_str)
         new_tab = cast_features(new_tab.collect())
         if output_format == "csv":
-            fname = f"yago{variant_tag}_{clean_type_str}.csv"
+            fname = f"{variant_tag}-{clean_type_str}.csv"
             new_tab.write_csv(Path(dest_path, fname))
         elif output_format == "parquet":
-            fname = f"yago{variant_tag}_{clean_type_str}.parquet"
+            fname = f"{variant_tag}-{clean_type_str}.parquet"
             new_tab.write_parquet(Path(dest_path, fname))
         else:
             raise ValueError(f"Unkown output format {output_format}")
@@ -530,7 +532,7 @@ def prepare_binary_tables(subjects_in_selected_types: pl.DataFrame, dest_path: s
                 pl.col("subject"), pl.col("cat_object").alias(col_name)
             ).select(pl.col("subject"), pl.col(col_name))
         if new_df is not None:
-            df_name = f"yago_binary_{col_name}.parquet"
+            df_name = f"binary-{col_name}.parquet"
             new_df.write_parquet(Path(dest_path, df_name))
         else:
             print(f"Something wrong with group {gname}")

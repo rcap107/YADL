@@ -183,7 +183,7 @@ if __name__ == "__main__":
 
     total_generated = 0
 
-    for pth in tqdm(viable_paths, total=len(viable_paths), position=0):
+    for pth in tqdm(viable_paths, total=len(viable_paths), position=1):
         table_name = pth.stem
 
         tgt_table = pl.read_parquet(pth)

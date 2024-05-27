@@ -1,11 +1,9 @@
 #%%
 import os
-import random
 import re
 from pathlib import Path
 
 import polars as pl
-import polars.selectors as cs
 from tqdm import tqdm
 
 import src.yago.utils as utils
@@ -22,16 +20,15 @@ def clean_string(string_to_clean):
 
 def prepare_facts_df():
     facts2_path = Path(yago_path, "facts_parquet/yago_updated_2022_part2")
-    fname = "yagoFacts"
-    yagofacts_path = Path(facts2_path, f"{fname}.tsv.parquet")
+    yagofacts_path = Path(facts2_path, "yagoFacts.tsv.parquet")
     yagofacts = utils.import_from_yago(yagofacts_path)
-    fname = "yagoLiteralFacts"
-    yagoliteralfacts_path = Path(facts2_path, f"{fname}.tsv.parquet")
-    yagoliteralfacts = utils.import_from_yago(yagoliteralfacts_path)
-    fname = "yagoDateFacts"
-    yagodatefacts_path = Path(facts2_path, f"{fname}.tsv.parquet")
-    yagodatefacts = utils.import_from_yago(yagodatefacts_path)
     yagofacts = yagofacts.drop("num_object")
+
+    yagoliteralfacts_path = Path(facts2_path, f"yagoLiteralFacts.tsv.parquet")
+    yagoliteralfacts = utils.import_from_yago(yagoliteralfacts_path)
+
+    yagodatefacts_path = Path(facts2_path, f"yagoDateFacts.tsv.parquet")
+    yagodatefacts = utils.import_from_yago(yagodatefacts_path)
     yagodatefacts = (
         yagodatefacts.with_columns(
             pl.col("cat_object")
@@ -51,9 +48,7 @@ def prepare_facts_df():
         .otherwise(pl.col("cat_object"))
         .alias("cat_object")
     ).drop("num_object")
-    df_facts = pl.concat([yagofacts, yagoliteralfacts, yagodatefacts]).drop("id")
-
-    return df_facts
+    return pl.concat([yagofacts, yagoliteralfacts, yagodatefacts]).drop("id")
 
 
 def get_subjects():

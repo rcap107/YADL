@@ -1,4 +1,4 @@
-# Building YADL
+# YADL: Yet Another Data Lake
 
 YADL (Yet Another Data Lake) is the benchmark data lake we developed for the paper "Retrieve, Merge, Predict: Augmenting Tables with Data Lakes".
 

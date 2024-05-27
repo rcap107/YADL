@@ -20,11 +20,14 @@ Alternatively, it is possible to build them starting from the YAGO 3 files, prov
 
 ### Using `main_yadl_construction.py`
 ```
-usage: main_yadl_construction.py [-h] [-d DATA_DIR] [--top_k TOP_K] [--min_count MIN_COUNT] [--explode_tables] [--comb_size COMB_SIZE [COMB_SIZE ...]] [--min_occurrences MIN_OCCURRENCES] [--cherry_pick_path CHERRY_PICK_PATH] {wordnet,seltab,binary,wordnet_cp}
+usage: main_yadl_construction.py [-h] [-d DATA_DIR] [--top_k TOP_K]
+                                 [--min_count MIN_COUNT] [--explode_tables]
+                                 [--comb_size COMB_SIZE [COMB_SIZE ...]]
+                                 [--min_occurrences MIN_OCCURRENCES] [--debug]
+                                 {wordnet,binary}
 
 positional arguments:
-  {wordnet,seltab,binary,wordnet_cp}
-                        Strategy to use.
+  {wordnet,binary}      Strategy to use.
 
 options:
   -h, --help            show this help message and exit
@@ -34,20 +37,22 @@ options:
   --min_count MIN_COUNT
   --explode_tables      After generating the tables, generate new synthetic subtables.
   --comb_size COMB_SIZE [COMB_SIZE ...]
-                        Size of the column combinations to be generated in the explode stage. Defaults to 2.
+                        Size of the column combinations to be generated in the explode
+                        stage. Defaults to 2.
   --min_occurrences MIN_OCCURRENCES
-                        Minimum number of non-null values to select a pair. Defaults to 100.
-  --cherry_pick_path CHERRY_PICK_PATH
-                        If provided, load cherry picked classes from the given file.
+                        Minimum number of non-null values to select a pair. Defaults to
+                        100.
+  --debug               If set, downsample the yago tables to 100_000 values to reduce
+                        runtime.
 ```
 
 
-To construct the `Wordnet` variant, use the following command and parameters:
+To construct the `YADL Base` variant, use the following command and parameters:
 ```
 python main_yadl_construction.py -d destination/path/to/use --explode_tables --comb_size 2 3 --top_k 200 wordnet
 ```
 
-To construct the `Binary` variant, use the following command and parameters:
+To construct the `YADL Binary` variant, use the following command and parameters:
 ```
 python main_yadl_construction.py -d destination/path/to/use binary
 ```

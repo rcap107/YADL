@@ -2,12 +2,14 @@ import os
 import re
 from itertools import combinations
 from pathlib import Path
-from typing import Union
 
 import pandas as pd
 import polars as pl
-import seaborn as sns
+from sklearn.utils import murmurhash3_32
 from tqdm import tqdm
+
+# Replace this path with the path to where your YAGO files are stored.
+YAGO_PATH = Path("/storage/store3/work/jstojano/yago3/")
 
 
 def cast_features(table: pl.DataFrame):
@@ -43,91 +45,6 @@ def import_from_yago(filepath: Path, debug=False):
     triplets = pl.read_parquet(filepath)[:-1]
     triplets.columns = ["id", "subject", "predicate", "cat_object", "num_object"]
     return triplets
-
-
-def find_unique_predicates(df: Union[pd.DataFrame, pl.DataFrame]):
-    """Given a triplet dataframe, return the unique values in column `predicate`.
-
-    Args:
-        df (Union[pd.DataFrame, pl.DataFrame]): Input dataframe.
-
-    Raises:
-        TypeError: Raise TypeError if `df` has the incorrect type.
-
-    Returns:
-        _type_: A df that contains the unique predicates.
-    """
-    if type(df) == pd.DataFrame:
-        return df["predicate"].unique()
-    elif type(df) == pl.DataFrame:
-        return df.lazy().select(pl.col("predicate").unique()).collect()
-    else:
-        raise TypeError("Inappropriate dataframe type.")
-
-
-def count_occurrences_by_columns(
-    df: Union[pd.DataFrame, pl.DataFrame], column: str = None, descending=True
-):
-    """Given a dataframe `df` and a column `column`, return a dataframe that contains the count of values
-    in the given column, sorted by default in descending order.
-
-    Args:
-        df (Union[pd.DataFrame, pl.DataFrame]): Dataframe to evaluate.
-        column (str, optional): Column to sort by. Defaults to None.
-        descending (bool, optional): Whether to sort in descending order or not. Defaults to True.
-
-    Raises:
-        ValueError: Raise ValueError if the column is not provided.
-        KeyError: Raise KeyError if the column is not found in the table.
-        TypeError: Raise TypeError if the dataframe is not `pd.DataFrame` or `pl.DataFrame`.
-
-    Returns:
-        _type_: Dataframe that contains the values and their occurences.
-    """
-    if column is None:
-        raise ValueError("Invalid column.")
-    if column not in df.columns:
-        raise KeyError(f"Column {column} not found. ")
-
-    if type(df) == pd.DataFrame:
-        return df.value_counts(column)
-    elif type(df) == pl.DataFrame:
-        return (
-            df.lazy()
-            .groupby(column)
-            .agg([pl.count()])
-            .sort("count", descending=descending)
-        ).collect()
-    else:
-        raise TypeError("Inappropriate dataframe type.")
-
-
-def get_cooccurring_predicates(df: pl.DataFrame):
-    """Given the df, perform a self-join, then return the predicate columns without
-    performing any aggregation.
-
-    Args:
-        df (pl.DataFrame): Yago-like dataframe to operate on.
-
-    Returns:
-        pl.DataFrame: A Dataframe that contains all the pairs of predicates without aggregation.
-    """
-    return (
-        df.lazy()
-        .join(df.lazy(), left_on="subject", right_on="subject", how="left")
-        .select([pl.col("predicate"), pl.col("predicate_right")])
-        .collect()
-    )
-
-
-def get_count_cooccurring_predicates(df: pl.DataFrame):
-    return (
-        df.lazy()
-        .groupby(["predicate", "predicate_right"])
-        .agg(pl.count())
-        .sort("count", descending=True)
-        .collect()
-    )
 
 
 def join_types_predicates(yagotypes, yagofacts, types_subset):
@@ -215,82 +132,6 @@ def read_yago_files(
     yagofacts_overall = pl.concat([yagofacts, yagoliteralfacts, yagodatefacts])
 
     return yagofacts_overall, yagotypes
-
-
-def get_selected_types(
-    subject_count_sorted: pl.DataFrame,
-    yagotypes: pl.DataFrame,
-    n_subjects=10000,
-    min_count=10,
-):
-    selected_types = (
-        subject_count_sorted.lazy()
-        .limit(n_subjects)  # Taking the top 10000 subjects
-        .join(yagotypes.lazy(), on="subject")  # Joining on types table
-        .select(  # Selecting only subject and type
-            [pl.col("subject"), pl.col("cat_object")]
-        )
-        .join(  # Joining again on yagotypes to get the count of subjects by type
-            yagotypes.groupby(  # Grouping to get the count of subjects by type
-                "cat_object"
-            )
-            .agg(pl.count())  # Count of subjects by type
-            .lazy(),
-            on="cat_object",
-        )
-        .sort(  # Sorting to have the most frequent types at the start
-            ["subject", "count"], descending=True
-        )
-        .groupby(["subject"])
-        .agg(  # Grouping by subject to have all types close to each other
-            pl.first("cat_object").suffix(
-                "_first"
-            )  # Selecting only the first entry from each group (i.e. the most frequent)
-        )
-        .groupby(  # At this point the selection is done
-            "cat_object_first"  # Grouping by type to remove duplicates
-        )
-        .agg(pl.count())  # counting the number of occurrences of each type
-        .sort("count", descending=True)  # Sorting by group (for convenience)
-        .select(
-            [pl.col("cat_object_first").alias("type"), pl.col("count")],
-        )
-        .filter(
-            pl.col("count") > min_count
-        )  # filter to select only the types that are connected to
-        # at least `min_count` subjects.
-        .collect()
-    )
-    return selected_types
-
-
-def prepare_subjects_types_seltab(
-    yagofacts, yagotypes, n_subjects=10000, min_count: int = 10
-):
-    subject_count_sorted = (
-        yagofacts.lazy()
-        .groupby("subject")
-        .agg(pl.count())
-        .sort("count", descending=True)
-        .collect()
-    )
-
-    selected_types = get_selected_types(
-        subject_count_sorted, yagotypes, n_subjects=n_subjects, min_count=min_count
-    )
-    subjects_in_selected_types = (
-        yagofacts.lazy()
-        .join(
-            selected_types.lazy()
-            .join(yagotypes.lazy(), left_on=["type"], right_on=["cat_object"])
-            .select([pl.col("subject"), pl.col("type")]),
-            left_on="subject",
-            right_on="subject",
-        )
-        .collect()
-    )
-
-    return subjects_in_selected_types, selected_types.rename({"cat_object": "type"})
 
 
 def prepare_subjects_types_wordnet(yagofacts, yagotypes, top_k=20, cherry_picked=None):
@@ -613,3 +454,179 @@ def prepare_combinations(args):
                     comb_size=csize,
                     min_occurrences=args.min_count,
                 )
+
+
+def prepare_facts_df():
+    facts2_path = Path(YAGO_PATH, "facts_parquet/yago_updated_2022_part2")
+    yagofacts_path = Path(facts2_path, "yagoFacts.tsv.parquet")
+    yagofacts = import_from_yago(yagofacts_path)
+    yagofacts = yagofacts.drop("num_object")
+
+    yagoliteralfacts_path = Path(facts2_path, "yagoLiteralFacts.tsv.parquet")
+    yagoliteralfacts = import_from_yago(yagoliteralfacts_path)
+
+    yagodatefacts_path = Path(facts2_path, "yagoDateFacts.tsv.parquet")
+    yagodatefacts = import_from_yago(yagodatefacts_path)
+    yagodatefacts = (
+        yagodatefacts.with_columns(
+            pl.col("cat_object")
+            .str.split("^^")
+            .list.first()
+            .str.to_datetime(strict=False)
+            .dt.date()
+            .cast(pl.Utf8)
+            .alias("cat_object")
+        )
+        .drop_nulls("cat_object")
+        .drop("num_object")
+    )
+    yagoliteralfacts = yagoliteralfacts.with_columns(
+        pl.when(pl.col("num_object").is_not_null())
+        .then(pl.col("num_object"))
+        .otherwise(pl.col("cat_object"))
+        .alias("cat_object")
+    ).drop("num_object")
+    return pl.concat([yagofacts, yagoliteralfacts, yagodatefacts]).drop("id")
+
+
+def get_subjects():
+    facts1_path = Path(YAGO_PATH, "facts_parquet/yago_updated_2022_part1")
+    yagotypes_path = Path(facts1_path, "yagoTypes.tsv.parquet")
+    df_types = import_from_yago(yagotypes_path)
+
+    subjects_with_wordnet = (
+        df_types.filter(pl.col("cat_object").str.starts_with("<wordnet_"))
+        .select(pl.col("subject"), pl.col("cat_object"))
+        .rename({"cat_object": "type"})
+    )
+    return subjects_with_wordnet
+
+
+def clean_string(string_to_clean):
+    pattern = re.compile(r"<{1}([a-zA-Z0-9_]+)>{1}")
+    m = re.sub(pattern, "\\1", string_to_clean)
+    return m
+
+
+def prepare_long_variant(dest_path: str | Path, max_fields=2):
+    df_facts = prepare_facts_df()
+    subjects_with_wordnet = get_subjects()
+    n_groups = len(subjects_with_wordnet.unique("type"))
+
+    os.makedirs(dest_path, exist_ok=True)
+    dest_path = Path(dest_path)
+
+    for this_type, this_df in tqdm(
+        subjects_with_wordnet.group_by("type"), total=n_groups
+    ):
+        clean_type = clean_string(this_type)
+        joined_df = df_facts.join(
+            this_df.select(pl.col("subject", "type")), on="subject"
+        )
+        if len(joined_df) == 0:
+            continue
+        base_df = joined_df.select(pl.col("subject").unique()).lazy()
+        for idx, grp in joined_df.group_by(by=["predicate"]):
+            this_predicate = clean_string(idx[0])
+            grp = (
+                grp.group_by("subject")
+                .head(max_fields)
+                .select(pl.col("subject", "cat_object"))
+                .rename({"cat_object": this_predicate})
+            )
+            try:
+                grp = grp.with_columns(pl.col(this_predicate).cast(pl.Float64))
+            except pl.ComputeError:
+                pass
+            grp = grp.lazy()
+            base_df = base_df.join(grp, on="subject", how="left")
+        base_df = base_df.rename({"subject": clean_type})
+        df_name = f"wordnet_vldb-{clean_type}.parquet"
+        base_df = base_df.collect()
+        if len(base_df) > 0:
+            base_df.write_parquet(Path(dest_path, df_name))
+
+
+def generate_table(table, col_comb, subject):
+    selected_ = subject + list(col_comb)
+    new_df = table.select(selected_).filter(
+        pl.any_horizontal(pl.col(col_comb).is_not_null())
+    )
+    return new_df
+
+
+def generate_batch(
+    dest_dir: Path | str,
+    target_columns: list[str],
+    base_table: pl.DataFrame,
+    table_name: str,
+    subject: str,
+    case: str,
+    col_resample: int = 10,
+    row_resample: int = 0,
+    min_occurrences: int = 100,
+    row_sample_fraction: float = 0.7,
+):
+    if row_resample < 0 or not isinstance(row_resample, int):
+        raise ValueError(f"Row resample value must be > 0, found {row_resample}")
+
+    new_dir = Path(dest_dir, table_name)
+    limit_break = 100
+    break_counter = 0
+    col_counter = 0
+    good_comb = set()
+    bad_comb = set()
+
+    min_sample_size = max(2, len(target_columns) - 2)
+    max_sample_size = len(target_columns)
+
+    for _ in tqdm(
+        range(col_resample),
+        total=col_resample,
+        position=0,
+        desc=table_name,
+        leave=False,
+    ):
+        # while break_counter < limit_break and col_counter < col_resample:
+        if break_counter > limit_break:
+            break
+        comb = random.sample(
+            target_columns, k=random.randint(min_sample_size, max_sample_size)
+        )
+        comb = tuple(comb)
+        if (comb not in good_comb) and (comb not in bad_comb):
+            table = generate_table(base_table, comb, subject)
+            if len(table) > min_occurrences:
+                good_comb.add(comb)
+                fname = (
+                    "-".join([table_name, str(murmurhash3_32("-".join(comb[:]))), case])
+                    + ".parquet"
+                )
+                col_counter += 1
+                destination_path = Path(new_dir, fname)
+                table.write_parquet(destination_path)
+                for sample_counter in range(row_resample):
+                    resampled_table = table.sample(fraction=row_sample_fraction)
+
+                    col_counter += 1
+                    fname = (
+                        "-".join(
+                            [
+                                table_name,
+                                str(murmurhash3_32("-".join(comb[:]))),
+                                str(sample_counter),
+                                case,
+                            ]
+                        )
+                        + ".parquet"
+                    )
+
+                    destination_path = Path(new_dir, fname)
+                    resampled_table.write_parquet(destination_path)
+            else:
+                bad_comb.add(comb)
+                break_counter += 1
+        else:
+            break_counter += 1
+
+    return col_counter

@@ -1,7 +1,0 @@
-<wordnet_city_108524735>
-<wordnet_county_108546183>
-<wordnet_state_108168978>
-<wordnet_country_108544813>
-<wordnet_party_108256968>
-<wordnet_political_campaign_107472929>
-<wordnet_politician_110450303>

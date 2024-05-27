@@ -1,23 +1,24 @@
 # Building YADL
 
-YADL (Yet Another Data Lake) is the benchmark data lake we developed for the paper "A Benchmarking Data Lake for Join Discovery and
-Learning with Relational Data".
+YADL (Yet Another Data Lake) is the benchmark data lake we developed for the paper "Retrieve, Merge, Predict: Augmenting Tables with Data Lakes".
 
 We use this repository to "unpack" the YAGO 3 tables in order to go from few, very large tables to a collection of smaller
 tables that contain some of the same information, in different formats.
 
 ## Preparing the base tables
-Base tables are prepared in notebook `notebooks/Building YADL base tables.ipynb`. The notebook contains all the details
-of the pre-processing and how the tables have been modified to be used in the benchmark.
+Depending on the method used (refer to the paper for more details), tables are prepared in one of the scripts
+- `generate_yadl_vldb.py`
+- `generate_yadl_vldb_variants.py`
+- `main_yadl_construction.py`
 
 ## Implementing the YADL variants
-For the time being, we implement two variants of the YADL data lake in `Binary` and `Wordnet`. Both variants are accessible for download
-on [zenodo.org](https://zenodo.org/record/8015298).
+We provide the YADL variants we used in the paper on [Zenodo]().
 
+If YAGO 3 files are available, additional variants may be constructed by using the scripts mentioned above.
 Alternatively, it is possible to build them starting from the YAGO 3 files, provided they are available, by using the script
 `main_yadl_construction.py`.
 
-### Usage
+### Using `main_yadl_construction.py`
 ```
 usage: main_yadl_construction.py [-h] [-d DATA_DIR] [--top_k TOP_K] [--min_count MIN_COUNT] [--explode_tables] [--comb_size COMB_SIZE [COMB_SIZE ...]] [--min_occurrences MIN_OCCURRENCES] [--cherry_pick_path CHERRY_PICK_PATH] {wordnet,seltab,binary,wordnet_cp}
 
@@ -50,28 +51,3 @@ To construct the `Binary` variant, use the following command and parameters:
 ```
 python main_yadl_construction.py -d destination/path/to/use binary
 ```
-
-**Details on parameters**
-The `strategy` parameter is used to select the specific method to be used to generate the main YADL tables, which are
-then spit over smaller subtables if the parameter `explode_tables` is also provided.
-
-`cherry_pick_path` is used to force the data lake to include tables that would otherwise be missing because of the
-heuristic used to select the predicates of interest.
-
-## Additional files
-Some additional notebooks that were used to perform some preliminary studies are provided to give
-further insight into YAGO.
-
-## Creating a custom version of YADL
-It is possible to create a custom version of YADL by modifying the YAGO 3 tables without following the methods that have
-been detailed here.
-
-The types and subjects used to build each YADL variant can be customized to select a different starting set. Function
-`get_selected_subject_types` implements this for variants `binary`, `wordnet`, `seltab`, and provides support for using
-cherry picked types. To create a new set of subjects/types, the user should write a custom function whose return value
-is similar to that of function `get_selected_subject_types`, where `subjects` is a view of `yagofacts` containing only
-the selected subjects and their type, while `types` is the list of types to be used, sorted in descending order by their
-frequency.
-
-To generate custom versions, use the `custom` value for parameter `strategy`, then provide the custom selection by using
-arguments `custom_subjects_path` and `custom_types_path`.

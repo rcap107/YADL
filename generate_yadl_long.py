@@ -10,7 +10,11 @@ def parse_args():
         default="data/yago3-dl/wordnet_vldb",
         help="Path where the tables will be saved.",
     )
-    parser.add_argument("--max_fields", default=2, help="Maximum number of side ")
+    parser.add_argument(
+        "--max_fields",
+        default=2,
+        help="Number of argument values to keep when building tables.",
+    )
 
     return parser.parse_args()
 

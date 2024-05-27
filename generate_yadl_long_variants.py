@@ -45,7 +45,7 @@ def parse_args():
         action="store",
         type=int,
         default=8,
-        help="Minimum number of columns of columns.",
+        help="Minimum number of columns.",
     )
     parser.add_argument(
         "--minimum_rows",

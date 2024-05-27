@@ -2,9 +2,7 @@ import argparse
 import os
 from pathlib import Path
 
-import polars as pl
-
-import src.yago.utils as utils
+from src import utils
 
 
 def parse_args():
@@ -14,7 +12,7 @@ def parse_args():
         action="store",
         default="wordnet",
         help="Strategy to use.",
-        choices=["wordnet", "seltab", "binary", "wordnet_cp", "custom"],
+        choices=["wordnet", "binary"],
     )
     parser.add_argument(
         "-d",
@@ -57,38 +55,12 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--cherry_pick_path",
-        action="store",
-        type=str,
-        default=None,
-        help="If provided, load cherry picked classes from the given file.",
-    )
-
-    parser.add_argument(
-        "--custom_subjects_path",
-        action="store",
-        type=str,
-        default=None,
-        help="If `strategy` is `custom`, path where the custom subjects are stored.",
-    )
-
-    parser.add_argument(
-        "--custom_types_path",
-        action="store",
-        type=str,
-        default=None,
-        help="If `strategy` is `custom`, path where the custom types are stored.",
-    )
-
-    parser.add_argument(
         "--debug",
         action="store_true",
         help="If set, downsample the yago tables to 100_000 values to reduce runtime. ",
     )
 
-    args = parser.parse_args()
-
-    return args
+    return parser.parse_args()
 
 
 def prepare_subtables(
@@ -142,7 +114,7 @@ def prepare_subtables(
 
 
 def get_selected_subjects_types(
-    yagofacts, yagotypes, strategy="wordnet", top_k=20, min_count=10, cherry_picked=None
+    yagofacts, yagotypes, strategy="wordnet", top_k=20, min_count=10
 ):
     """Extract a subset of types and subjects from YAGO to use when building the tables. Different values for `strategy`
     can be used.
@@ -153,7 +125,6 @@ def get_selected_subjects_types(
         strategy (str, optional): _description_. Defaults to "wordnet".
         top_k (int, optional): _description_. Defaults to 20.
         min_count (int, optional): _description_. Defaults to 10.
-        cherry_picked (_type_, optional): _description_. Defaults to None.
 
     Raises:
         ValueError: _description_
@@ -161,56 +132,15 @@ def get_selected_subjects_types(
     Returns:
         _type_: _description_
     """
-    if strategy in ["wordnet", "wordnet_cp", "binary"]:
-        (subjects, types,) = utils.prepare_subjects_types_wordnet(
-            yagofacts, yagotypes, top_k=top_k, cherry_picked=cherry_picked
-        )
-
-    elif strategy == "seltab":
-        (subjects, types,) = utils.prepare_subjects_types_seltab(
-            yagofacts, yagotypes, min_count=min_count
-        )
+    if strategy in ["wordnet", "binary"]:
+        (
+            subjects,
+            types,
+        ) = utils.prepare_subjects_types_wordnet(yagofacts, yagotypes, top_k=top_k)
     else:
         raise ValueError(f"Unknown strategy {strategy}")
 
     return subjects, types
-
-
-def read_custom_subjects_types(path_subjects, path_types):
-    path_subjects = Path(path_subjects)
-    path_types = Path(path_types)
-
-    if path_subjects.exists() and path_types.exists():
-        subjects = pl.read_parquet(path_subjects)
-        types = pl.read_parquet(path_types)
-        return subjects, types
-    else:
-        raise FileNotFoundError("One of the files was not found.")
-
-
-def read_cherry_picked(path_to_file):
-    """Read a list of YAGO predicates to add to the predicates to be used while creating the data lake, to guarantee
-    they are present in YADL.
-
-    Note that no error checking over the format of the predicates is done at this step.
-
-    Args:
-        path_to_file (str): Path to the file containing the predicates.
-
-    Raises:
-        FileNotFoundError: Raise FileNotFoundError if the provided path does not exist.
-
-    Returns:
-        list: List of classes to be used.
-    """
-    if Path(path_to_file).exists():
-        cp_list = []
-        with open(path_to_file, "r") as fp:
-            for idx, row in enumerate(fp):
-                cp_list.append(row.strip())
-        return cp_list
-    else:
-        raise FileNotFoundError(f"File {path_to_file} was not found.")
 
 
 if __name__ == "__main__":
@@ -222,31 +152,21 @@ if __name__ == "__main__":
 
     print("Reading files")
     yagofacts, yagotypes = utils.read_yago_files(debug=args.debug)
-    if strategy == "wordnet_cp":
-        cherry_picked = read_cherry_picked(args.cherry_pick_path)
-    else:
-        cherry_picked = None
 
-    if strategy != "custom":
-        selected_subjects, selected_types = get_selected_subjects_types(
-            yagofacts,
-            yagotypes,
-            strategy=strategy,
-            top_k=args.top_k,
-            min_count=args.min_count,
-            cherry_picked=cherry_picked,
-        )
-    else:
-        selected_subjects, selected_types = read_custom_subjects_types(
-            args.custom_subjects_path, args.custom_types_path
-        )
+    selected_subjects, selected_types = get_selected_subjects_types(
+        yagofacts,
+        yagotypes,
+        strategy=strategy,
+        top_k=args.top_k,
+        min_count=args.min_count,
+    )
 
     if strategy == "binary":
         utils.prepare_binary_tables(
             selected_subjects,
             dest_path=data_dir,
         )
-    elif strategy in ["wordnet", "seltab", "wordnet_cp", "custom"]:
+    elif strategy == "wordnet":
         prepare_subtables(
             yagofacts, yagotypes, selected_types, dest_path=data_dir, strategy=strategy
         )

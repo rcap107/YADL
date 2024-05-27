@@ -7,8 +7,9 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 import polars.selectors as cs
-from sklearn.utils import murmurhash3_32
 from tqdm import tqdm
+
+from src import utils
 
 random.seed(42)
 
@@ -55,93 +56,6 @@ def parse_args():
     )
 
     return parser.parse_args()
-
-
-# %%
-def generate_table(table, col_comb, subject):
-    selected_ = subject + list(col_comb)
-    new_df = table.select(selected_).filter(
-        pl.any_horizontal(pl.col(col_comb).is_not_null())
-    )
-    return new_df
-
-
-# %%
-def generate_batch(
-    dest_dir: Path | str,
-    target_columns: list[str],
-    base_table: pl.DataFrame,
-    table_name: str,
-    subject: str,
-    case: str,
-    col_resample: int = 10,
-    row_resample: int = 0,
-    min_occurrences: int = 100,
-    row_sample_fraction: float = 0.7,
-):
-    if row_resample < 0 or not isinstance(row_resample, int):
-        raise ValueError(f"Row resample value must be > 0, found {row_resample}")
-
-    new_dir = Path(dest_dir, table_name)
-    limit_break = 100
-    break_counter = 0
-    col_counter = 0
-    good_comb = set()
-    bad_comb = set()
-
-    min_sample_size = max(2, len(target_columns) - 2)
-    max_sample_size = len(target_columns)
-
-    for _ in tqdm(
-        range(col_resample),
-        total=col_resample,
-        position=0,
-        desc=table_name,
-        leave=False,
-    ):
-        # while break_counter < limit_break and col_counter < col_resample:
-        if break_counter > limit_break:
-            break
-        comb = random.sample(
-            target_columns, k=random.randint(min_sample_size, max_sample_size)
-        )
-        comb = tuple(comb)
-        if (comb not in good_comb) and (comb not in bad_comb):
-            table = generate_table(base_table, comb, subject)
-            if len(table) > min_occurrences:
-                good_comb.add(comb)
-                fname = (
-                    "-".join([table_name, str(murmurhash3_32("-".join(comb[:]))), case])
-                    + ".parquet"
-                )
-                col_counter += 1
-                destination_path = Path(new_dir, fname)
-                table.write_parquet(destination_path)
-                for sample_counter in range(row_resample):
-                    resampled_table = table.sample(fraction=row_sample_fraction)
-
-                    col_counter += 1
-                    fname = (
-                        "-".join(
-                            [
-                                table_name,
-                                str(murmurhash3_32("-".join(comb[:]))),
-                                str(sample_counter),
-                                case,
-                            ]
-                        )
-                        + ".parquet"
-                    )
-
-                    destination_path = Path(new_dir, fname)
-                    resampled_table.write_parquet(destination_path)
-            else:
-                bad_comb.add(comb)
-                break_counter += 1
-        else:
-            break_counter += 1
-
-    return col_counter
 
 
 # %%
@@ -205,7 +119,7 @@ if __name__ == "__main__":
         os.makedirs(new_dir, exist_ok=True)
 
         # # All columns
-        total_generated += generate_batch(
+        total_generated += utils.generate_batch(
             dest_path,
             target_columns,
             tgt_table,
@@ -221,7 +135,7 @@ if __name__ == "__main__":
         # Numerical columns
         if len(num_columns) >= 2:
             # print(table_name)
-            total_generated += generate_batch(
+            total_generated += utils.generate_batch(
                 dest_path,
                 num_columns,
                 tgt_table,

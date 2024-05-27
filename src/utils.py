@@ -1,4 +1,5 @@
 import os
+import random
 import re
 from itertools import combinations
 from pathlib import Path
@@ -457,16 +458,35 @@ def prepare_combinations(args):
 
 
 def prepare_facts_df():
+    """Utility function that reads the YAGO facts, perform some preprocessing and returns a concatenated dataframe that
+    includes all selected facts.
+
+    Returns:
+        pl.DataFrame: A dataframe that contains all the processed facts.
+    """
+    # yagoFacts are relations between entities (they are mostly categorical)
     facts2_path = Path(YAGO_PATH, "facts_parquet/yago_updated_2022_part2")
     yagofacts_path = Path(facts2_path, "yagoFacts.tsv.parquet")
     yagofacts = import_from_yago(yagofacts_path)
+    # num_object is empty
     yagofacts = yagofacts.drop("num_object")
 
+    # yagoLiteralFacts may contain numerical facts (e.g., population density)
     yagoliteralfacts_path = Path(facts2_path, "yagoLiteralFacts.tsv.parquet")
     yagoliteralfacts = import_from_yago(yagoliteralfacts_path)
 
+    # moving num_object values to cat_object for concatenation
+    yagoliteralfacts = yagoliteralfacts.with_columns(
+        pl.when(pl.col("num_object").is_not_null())
+        .then(pl.col("num_object"))
+        .otherwise(pl.col("cat_object"))
+        .alias("cat_object")
+    ).drop("num_object")
+
+    # yagoDateFacts contains dates
     yagodatefacts_path = Path(facts2_path, "yagoDateFacts.tsv.parquet")
     yagodatefacts = import_from_yago(yagodatefacts_path)
+    # some dates are incomplete, so we select only the year for each date
     yagodatefacts = (
         yagodatefacts.with_columns(
             pl.col("cat_object")
@@ -480,16 +500,16 @@ def prepare_facts_df():
         .drop_nulls("cat_object")
         .drop("num_object")
     )
-    yagoliteralfacts = yagoliteralfacts.with_columns(
-        pl.when(pl.col("num_object").is_not_null())
-        .then(pl.col("num_object"))
-        .otherwise(pl.col("cat_object"))
-        .alias("cat_object")
-    ).drop("num_object")
+    # the different dataframes are concatenated
     return pl.concat([yagofacts, yagoliteralfacts, yagodatefacts]).drop("id")
 
 
 def get_subjects():
+    """Utility function that reads the subjects and executes some preprocessing.
+
+    Returns:
+        pl.DataFrame: A dataframe that contains all the subjects.
+    """
     facts1_path = Path(YAGO_PATH, "facts_parquet/yago_updated_2022_part1")
     yagotypes_path = Path(facts1_path, "yagoTypes.tsv.parquet")
     df_types = import_from_yago(yagotypes_path)
@@ -566,12 +586,36 @@ def generate_batch(
     row_resample: int = 0,
     min_occurrences: int = 100,
     row_sample_fraction: float = 0.7,
+    limit_break=100,
 ):
+    """This function generates a batch of subtables according to the provided
+    set of parameters. It takes as input the destination path, the columns that
+    should be used for generating subtables, additional parameters for saving the
+    file and generating subtables.
+
+    Args:
+        dest_dir (Path | str): Path where the resulting subtables will be saved.
+        target_columns (list[str]): List of columns that should be used for generating the subtables.
+        base_table (pl.DataFrame): Table to be used as seed for the subtables.
+        table_name (str): Name of the table (for saving on disk).
+        subject (str): Name of the subject, used for selecting the column to keep.
+        case (str): String to be added to the filename.
+        col_resample (int, optional): Number of subtables to generate for each base table. Defaults to 10.
+        row_resample (int, optional): Number of row resamplings to generate to increase row redundancy. Defaults to 0.
+        min_occurrences (int, optional): Minimum size of the generated table. Tables smaller than this will be filtered out. Defaults to 100.
+        row_sample_fraction (float, optional): Size of the row resamplings. Defaults to 0.7.
+        limit_break (int, optional): Number of attempts at generating a viable subtable before skipping to the next. Defaults to 100.
+
+    Raises:
+        ValueError: Raises ValueError if the values of row_resample are not correct.
+
+    Returns:
+        int: Number of subtables that have successfully been generated.
+    """
     if row_resample < 0 or not isinstance(row_resample, int):
         raise ValueError(f"Row resample value must be > 0, found {row_resample}")
 
     new_dir = Path(dest_dir, table_name)
-    limit_break = 100
     break_counter = 0
     col_counter = 0
     good_comb = set()
@@ -587,7 +631,6 @@ def generate_batch(
         desc=table_name,
         leave=False,
     ):
-        # while break_counter < limit_break and col_counter < col_resample:
         if break_counter > limit_break:
             break
         comb = random.sample(

@@ -120,8 +120,8 @@ def get_selected_subjects_types(
     can be used.
 
     Args:
-        yagofacts (_type_): _description_
-        yagotypes (_type_): _description_
+        yagofacts (pl.DataFrame): _description_
+        yagotypes (pl.DataFrame): _description_
         strategy (str, optional): _description_. Defaults to "wordnet".
         top_k (int, optional): _description_. Defaults to 20.
         min_count (int, optional): _description_. Defaults to 10.

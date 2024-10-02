@@ -32,7 +32,7 @@ def cast_features(table: pl.DataFrame):
     return table
 
 
-def import_from_yago(filepath: Path, debug=False):
+def import_from_yago(filepath: Path, debug=False, limit=None):
     """Given a parquet file, read it assuming YAGO format. The last row is dropped.
 
     Args:
@@ -43,6 +43,8 @@ def import_from_yago(filepath: Path, debug=False):
     """
     if debug:
         triplets = pl.scan_parquet(filepath, n_rows=100_000).collect().sample(10_000)
+    if limit:
+        triplets = pl.scan_parquet(filepath).head(limit).collect()
     triplets = pl.read_parquet(filepath)[:-1]
     triplets.columns = ["id", "subject", "predicate", "cat_object", "num_object"]
     return triplets
